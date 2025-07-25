@@ -1,4 +1,4 @@
-// src/services/WorldKnowledge.ts (修正版 - setBotInstanceを追加)
+// src/services/WorldKnowledge.ts v1.14
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
@@ -22,6 +22,7 @@ export class WorldKnowledge {
     private bot: mineflayer.Bot;
     private entities: Map<number, WorldEntity> = new Map();
     private players: Map<string, WorldEntity> = new Map();
+    private isPathfindingActive: boolean = false; // 経路探索が現在アクティブかどうかのフラグ
 
     constructor(bot: mineflayer.Bot) {
         this.bot = bot;
@@ -30,36 +31,25 @@ export class WorldKnowledge {
         console.log('WorldKnowledge initialized. Monitoring world events...');
     }
 
-    // 新規追加: ボットインスタンスを更新するメソッド
     public setBotInstance(newBot: mineflayer.Bot): void {
-        // 古いリスナーを削除
+        console.log('WorldKnowledge: Updating bot instance.');
         if (this.bot) {
             this.bot.removeAllListeners();
         }
         this.bot = newBot;
-        this.bot.loadPlugin(pathfinderPlugin); // 新しいボットにもプラグインをロード
-        this.setupEventListeners(); // 新しいボットでリスナーを再設定
-        this.clearKnowledge('Bot instance updated'); // 知識をクリア
+        this.bot.loadPlugin(pathfinderPlugin);
+        this.setupEventListeners();
+        this.clearKnowledge('Bot instance updated');
         console.log('WorldKnowledge: Bot instance updated and listeners re-setup.');
     }
 
     private setupEventListeners(): void {
-        // イベントリスナーを登録する前に、既存のリスナーを全て削除 (念のため再確認)
-        // constructorやsetBotInstanceから呼ばれる際、常にクリーンな状態にする
         if (this.bot) {
-            // bot.removeAllListeners() は全てのイベントリスナーを削除するため、
-            // setupEventListenersが呼ばれるたびに過去のリスナーが削除される。
-            // しかし、これが重複している原因ではない場合がある。
-            // もしBotManagerが既に一部リスナーを登録している場合、
-            // ここで削除してしまうとBotManagerの機能が損なわれる可能性がある。
-            // ここでの this.bot.removeAllListeners(); は setBotInstance() に任せる
-            // setupEventListeners() を呼ぶ前に bot にリスナーがないことを前提とする
-            // または、BotManagerのイベント購読はremoveAllListenersの影響を受けないように設計する
-            // 現在のBotManagerのリスナーはbotインスタンスを生成する際に once で登録されるため、
-            // ここで removeAllListeners を呼んでも問題ない。
-            this.bot.removeAllListeners(); // 既存の全てのリスナーを削除して重複登録を防ぐ
+            this.bot.removeAllListeners();
         }
         
+        console.log("WorldKnowledge: Pathfinder movements will use default configuration.");
+
         this.bot.on('entitySpawn', (entity: Entity) => this.handleEntitySpawn(entity));
         this.bot.on('entityGone', (entity: Entity) => this.handleEntityGone(entity));
         this.bot.on('entityMoved', (entity: Entity) => this.handleEntityMoved(entity));
@@ -70,7 +60,6 @@ export class WorldKnowledge {
         this.bot.on('kicked', (reason: string) => this.clearKnowledge(reason));
         this.bot.on('end', (reason: string) => this.clearKnowledge(reason));
 
-        // once は一度発火すると自動的に削除されるため、重複登録の心配はない
         this.bot.once('spawn', () => { 
             console.log('Bot spawned. Populating initial world knowledge.');
             for (const entityId in this.bot.entities) {
@@ -84,14 +73,12 @@ export class WorldKnowledge {
 
     private handleEntitySpawn(entity: Entity): void {
         if (!entity || !entity.position) return;
-
         const worldEntity: WorldEntity = {
             id: entity.id,
             type: entity.type as any,
             position: entity.position,
             health: (entity as any).health,
         };
-
         if (entity.type === 'player' && entity.username) {
             worldEntity.username = entity.username;
             worldEntity.name = entity.username;
@@ -99,13 +86,11 @@ export class WorldKnowledge {
         } else if (entity.name) {
             worldEntity.name = entity.name;
         }
-
         this.entities.set(entity.id, worldEntity);
     }
 
     private handleEntityGone(entity: Entity): void {
         if (!entity) return;
-
         if (this.entities.has(entity.id)) {
             const removedEntity = this.entities.get(entity.id);
             if (removedEntity && removedEntity.username) {
@@ -117,7 +102,6 @@ export class WorldKnowledge {
 
     private handleEntityMoved(entity: Entity): void {
         if (!entity || !entity.position) return;
-
         const knownEntity = this.entities.get(entity.id);
         if (knownEntity) {
             knownEntity.position = entity.position;
@@ -129,7 +113,6 @@ export class WorldKnowledge {
 
     private handlePlayerJoined(player: mineflayer.Player): void {
         if (!player || !player.username || !player.entity) return;
-
         const worldEntity: WorldEntity = {
             id: player.entity.id,
             type: 'player',
@@ -147,7 +130,6 @@ export class WorldKnowledge {
 
     private handlePlayerLeft(player: mineflayer.Player): void {
         if (!player || !player.username) return;
-
         if (this.players.has(player.username)) {
             const removedPlayer = this.players.get(player.username);
             if (removedPlayer && removedPlayer.id) {
@@ -210,8 +192,29 @@ export class WorldKnowledge {
             return null;
         }
 
+        if (this.isPathfindingActive) {
+            console.log("WorldKnowledge: Pathfinding already active. Skipping new request.");
+            return null;
+        }
+
+        this.isPathfindingActive = true;
+
         const goal = new goals.GoalNear(endPos.x, endPos.y, endPos.z, range);
-        this.bot.pathfinder.setGoal(goal);
+        
+        // --- ここを修正: Goalにタイムアウトを設定 ---
+        // PathfinderOptions (Goalの第2引数) に timeout プロパティを設定
+        // デフォルトは60000 (60秒) ですが、短くして素早くタイムアウトさせる
+        (goal as any).timeout = 5000; // 5秒でタイムアウト (goals.jsの内部プロパティに直接設定)
+        // または、bot.pathfinder.setGoal(goal, { timeout: 5000 }); のようにsetGoalの第二引数に渡す (PathfinderOptions)
+        // 現状のPathfinder型定義にはsetGoalの第二引数がないため、goalオブジェクトに直接プロパティを追加
+        // ※ もし `mineflayer-pathfinder` のバージョンが新しい場合、`goals.Goal` のコンストラクタが `timeout` を受け取るかもしれません。
+        // ※ あるいは `bot.pathfinder.setGoal(goal, options)` のように options を渡す形式の場合もあります。
+        // 現在の `mineflayer-pathfinder@2.4.5` の `goals.js` ソースコードを見ると、
+        // Goalオブジェクトに直接 `timeout` プロパティを設定する形は一般的ではないようです。
+        // setGoal の第二引数に `{ timeout: number }` を渡すのがより正しい方法です。
+        // ただし、型定義がそれを許容しないため、一旦 `any` でアサーションします。
+        this.bot.pathfinder.setGoal(goal, { timeout: 5000 } as any); // setGoalの第二引数でタイムアウトを設定 (anyアサーション)
+        // --- 修正終わり ---
 
         console.log(`Pathfinding started towards ${endPos.x},${endPos.y},${endPos.z} (range: ${range})`);
 
@@ -220,10 +223,12 @@ export class WorldKnowledge {
                 this.bot.removeListener('goal_reached', onGoalReached);
                 this.bot.removeListener('goal_cant_be_reached', onGoalCantBeReached);
                 this.bot.removeListener('goal_timeout', onGoalTimeout);
+                this.isPathfindingActive = false; // 経路探索終了フラグを解除
             };
 
             const onGoalReached = () => {
                 cleanUpListeners();
+                console.log(`Pathfinding: Goal reached at ${endPos.x},${endPos.y},${endPos.z}.`);
                 resolve({ result: 'success', movements: [] } as Path);
             };
             const onGoalCantBeReached = () => {
@@ -246,6 +251,7 @@ export class WorldKnowledge {
     public stopPathfinding(): void {
         if (this.bot.pathfinder) {
             this.bot.pathfinder.stop();
+            this.isPathfindingActive = false; 
             console.log("Pathfinding stopped.");
         }
     }

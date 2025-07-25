@@ -1,19 +1,18 @@
-// src/types/mineflayer-extensions.d.ts (最終最終版 - pathfinderイベントをBotEventsに追加)
+// src/types/mineflayer-extensions.d.ts v1.2
 
 import { EventEmitter } from 'events';
 import { Block as PrismarineBlock } from 'prismarine-block';
 import { Entity as PrismarineEntity } from 'prismarine-entity';
-import { IndexedData } from 'minecraft-data'; // minecraft-data がインストールされている前提
+import { IndexedData } from 'minecraft-data'; 
 
 declare module 'mineflayer' {
     interface Bot {
         pathfinder: import('mineflayer-pathfinder').Pathfinder & EventEmitter;
         entity: PrismarineEntity;
         entities: { [id: number]: PrismarineEntity };
-        registry: IndexedData; // minecraft-data がインストールされている前提
+        registry: IndexedData;
     }
 
-    // BotEvents に mineflayer-pathfinder 関連イベントを追加
     interface BotEvents {
         entitySpawn: (entity: PrismarineEntity) => void;
         entityGone: (entity: PrismarineEntity) => void;
@@ -22,15 +21,13 @@ declare module 'mineflayer' {
         playerJoined: (player: mineflayer.Player) => void;
         playerLeft: (player: mineflayer.Player) => void;
 
-        // --- mineflayer-pathfinder 関連イベントの追加 ---
         goal_reached: () => void;
         goal_cant_be_reached: () => void;
         goal_timeout: () => void;
-        // --- End mineflayer-pathfinder 関連イベント ---
     }
 }
 
-// mineflayer-pathfinder の型定義は変更なし
+// mineflayer-pathfinder の型定義を拡張
 declare module 'mineflayer-pathfinder' {
     interface Pathfinder extends EventEmitter {
         getPathTo(
@@ -39,8 +36,27 @@ declare module 'mineflayer-pathfinder' {
             timeout?: number
         ): Path;
     }
+
     interface Path {
         result: string;
         movements: Array<any>;
+    }
+
+    // Movements インターフェースを拡張し、足りないプロパティを追加
+    interface Movements {
+        // --- ここに追加 ---
+        canDig: boolean;
+        canOpenDoors: boolean;
+        canBreakDoors: boolean;
+        allowFreecrafting: boolean;
+        allowSprinting: boolean;
+        allowDiagonal: boolean;
+        maxDropDown: number;
+        allowParkour: boolean;
+        scafoldingBlocks: number[];
+        waterCost: number;
+        lavaCost: number;
+        // --- ここまで ---
+        // その他、もし後で必要になったプロパティがあればここに追加
     }
 }

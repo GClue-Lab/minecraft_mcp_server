@@ -14,8 +14,10 @@ export interface BaseMcpCommand {
 export interface FollowPlayerCommand extends BaseMcpCommand {
     type: 'followPlayer';
     targetPlayer: string; // 追従するプレイヤー名
-    distanceThreshold?: number; // 追加: プレイヤーに近づく目標距離
-    recheckInterval?: number;   // 追加: 追従ロジックを再確認する間隔 (ミリ秒)
+    distanceThreshold?: number; // プレイヤーに近づく目標距離
+    recheckInterval?: number;   // 追従ロジックを再確認する間隔 (ミリ秒)
+    maxPathfindingAttempts?: number; // 経路探索の最大試行回数 (失敗時)
+    maxFallbackPathfindingRange?: number; // 新規追加: ジャンプで越えられない場合に迂回を試みる範囲
 }
 
 /**
@@ -78,6 +80,16 @@ export interface SetCombatModeCommand extends BaseMcpCommand {
     mode: 'on' | 'off'; // 'on' で警戒モードON, 'off' でOFF
 }
 
+/**
+ * 'teleport' コマンドの型定義 (新規追加)
+ */
+export interface TeleportCommand extends BaseMcpCommand {
+    type: 'teleport';
+    x: number;
+    y: number;
+    z: number;
+    // 必要であれば、yaw, pitchなども追加可能
+}
 
 /**
  * MCPサーバーが受け入れる全てのコマンドの結合型
@@ -90,7 +102,8 @@ export type McpCommand =
     | AttackMobCommand
     | StopCommand
     | ConnectCommand
-    | SetCombatModeCommand;
+    | SetCombatModeCommand
+    | TeleportCommand;
 
 /**
  * MCPサーバーからの基本的な応答構造

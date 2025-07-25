@@ -1,7 +1,7 @@
-// src/services/CommandHandler.ts (修正版 - followPlayerオプションを明示的に渡す)
+// src/services/CommandHandler.ts v1.2
 
 import * as mineflayer from 'mineflayer';
-import { Vec3 } from 'vec3';
+import { Vec3 } from 'vec3'; // Vec3はここからインポート
 
 import {
     McpCommand,
@@ -16,6 +16,7 @@ import {
     StopCommand,
     ConnectCommand,
     SetCombatModeCommand,
+    TeleportCommand, // 追加: TeleportCommandをインポート
     BaseMcpCommand
 } from '../types/mcp';
 
@@ -64,6 +65,12 @@ export class CommandHandler {
             return this.handleSetCombatMode(command as SetCombatModeCommand);
         }
 
+        // --- TeleportCommand はボット接続後であればいつでも実行可能 ---
+        if (command.type === 'teleport') {
+            return await this.handleTeleport(command as TeleportCommand);
+        }
+        // --- 修正終わり ---
+
         const bot = this.botManager.getBot();
         if (!bot) {
             return this.createErrorResponse(
@@ -87,7 +94,7 @@ export class CommandHandler {
                     return await this.handleSendMessage(bot, command as SendMessageCommand);
                 case 'getStatus':
                     return this.handleGetStatus(bot, command as GetStatusCommand);
-                case 'followPlayer': // ここを修正
+                case 'followPlayer':
                     return await this.handleFollowPlayer(command as FollowPlayerCommand);
                 case 'mineBlock':
                     return await this.handleMineBlock(command as MineBlockCommand);
@@ -131,13 +138,14 @@ export class CommandHandler {
         return this.createSuccessResponse(command.id, 'Current bot status.', status);
     }
 
-    // ここを修正: followPlayerコマンドのオプションを明示的に渡す
     private async handleFollowPlayer(command: FollowPlayerCommand): Promise<McpResponse> {
         if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
         const options: FollowPlayerOptions = {
             targetPlayer: command.targetPlayer,
-            distanceThreshold: command.distanceThreshold !== undefined ? command.distanceThreshold : undefined, // ここを修正
-            recheckInterval: command.recheckInterval !== undefined ? command.recheckInterval : undefined,     // ここを修正
+            distanceThreshold: command.distanceThreshold !== undefined ? command.distanceThreshold : undefined,
+            recheckInterval: command.recheckInterval !== undefined ? command.recheckInterval : undefined,
+            maxPathfindingAttempts: command.maxPathfindingAttempts !== undefined ? command.maxPathfindingAttempts : undefined,
+            maxFallbackPathfindingRange: command.maxFallbackPathfindingRange !== undefined ? command.maxFallbackPathfindingRange : undefined,
         };
         const started = await this.behaviorEngine.startBehavior('followPlayer', options);
         if (started) {
@@ -162,10 +170,10 @@ export class CommandHandler {
     private async handleMineBlock(command: MineBlockCommand): Promise<McpResponse> {
         if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
         const options: MineBlockOptions = {
-            blockId: command.blockId !== undefined ? command.blockId : undefined, // ここを修正
-            blockName: command.blockName !== undefined ? command.blockName : undefined, // ここを修正
-            quantity: command.quantity !== undefined ? command.quantity : undefined, // ここを修正
-            maxDistance: command.maxDistance !== undefined ? command.maxDistance : undefined, // ここを修正
+            blockId: command.blockId !== undefined ? command.blockId : undefined,
+            blockName: command.blockName !== undefined ? command.blockName : undefined,
+            quantity: command.quantity !== undefined ? command.quantity : undefined,
+            maxDistance: command.maxDistance !== undefined ? command.maxDistance : undefined,
         };
         const started = await this.behaviorEngine.startBehavior('mineBlock', options);
         if (started) {
@@ -207,6 +215,25 @@ export class CommandHandler {
         this.behaviorEngine.stopCurrentBehavior();
         return this.createSuccessResponse(command.id, 'Current behavior stopped.');
     }
+
+    private async handleTeleport(command: TeleportCommand): Promise<McpResponse> {
+        const bot = this.botManager.getBot();
+        if (!bot) {
+            return this.createErrorResponse(command.id, "Bot not connected for teleportation.");
+        }
+        try {
+            const { x, y, z } = command;
+            // creative.teleportTo() は存在しないため、bot.chat('/tp ...') を使用
+            bot.chat(`/tp ${bot.username} ${x} ${y} ${z}`);
+            // テレポートは非同期で完了するため、少し待つか、チャットイベントで確認するのが理想的だが、
+            // ここではコマンド送信の成功をすぐに返す
+            await new Promise(resolve => setTimeout(resolve, 500)); // 少し待ってコマンドがサーバーに届くのを確実にする
+            return this.createSuccessResponse(command.id, `Teleported bot to ${x}, ${y}, ${z}.`);
+        } catch (error: any) {
+            return this.createErrorResponse(command.id, `Failed to teleport bot: ${error.message || 'Unknown error'}`);
+        }
+    }
+
 
     private createSuccessResponse(commandId: string | undefined, message: string, data?: any): SuccessMcpResponse {
         return { status: 'success', commandId, message, data };

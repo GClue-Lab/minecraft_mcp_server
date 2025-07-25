@@ -1,4 +1,4 @@
-// src/services/BehaviorEngine.ts (修正版 - setBotInstanceを追加)
+// src/services/BehaviorEngine.ts v1.2
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
@@ -52,21 +52,15 @@ export class BehaviorEngine {
         this.botManager = botManager;
         console.log('BehaviorEngine initialized.');
         this.setupBotEvents(botManager);
-        this.startInterruptMonitor();
+        this.startInterruptMonitor(); // ここで呼び出し
     }
 
-    // 新規追加: ボットインスタンスを更新するメソッド
     public setBotInstance(newBot: mineflayer.Bot): void {
         this.bot = newBot;
-        // 既存の行動インスタンスも新しいボットインスタンスに再接続する必要があるが、
-        // 現状はコンストラクタでボットを受け取るため、 BehaviorEngine は再初期化される。
-        // もし BehaviorEngine が永続化されるなら、各 BehaviorInstance のボットも更新する必要がある。
-        // ここでは、新しいボットがBehaviorEngineに正しく設定されたことをログで示す。
         console.log('BehaviorEngine: Bot instance updated.');
     }
 
     public setupBotEvents(botManager: BotManager): void {
-        // ... (既存のイベントリスナーは変更なし) ...
         botManager.getBotInstanceEventEmitter().on('death', () => {
             console.warn('BehaviorEngine: Bot died! Stopping current behavior and clearing stack.');
             this.stopCurrentBehavior();
@@ -81,22 +75,24 @@ export class BehaviorEngine {
         this.bot.on('health', () => {
             const botHealth = this.bot.health;
             if (botHealth && botHealth < 20) {
-                this.tryInterruptForCombat(true);
+                this.tryInterruptForCombat(true); // 引数を渡す
             }
         });
     }
 
+    // 新規追加: 割り込み監視のインターバルを開始するメソッド
     private startInterruptMonitor(): void {
         if (this.interruptMonitorInterval) {
             clearInterval(this.interruptMonitorInterval);
         }
         this.interruptMonitorInterval = setInterval(() => {
             if (this.combatModeEnabled) {
-                this.tryInterruptForCombat(false);
+                this.tryInterruptForCombat(false); // 引数を渡す
             }
         }, this.MONITOR_INTERVAL_MS);
     }
 
+    // 新規追加: 警戒モードを設定するメソッド
     public setCombatMode(enabled: boolean): void {
         this.combatModeEnabled = enabled;
         console.log(`BehaviorEngine: Combat Mode set to ${enabled ? 'ON' : 'OFF'}.`);
@@ -109,7 +105,8 @@ export class BehaviorEngine {
         }
     }
 
-    private tryInterruptForCombat(forceInterrupt: boolean): void {
+    // tryInterruptForCombat メソッドの引数を修正
+    private tryInterruptForCombat(forceInterrupt: boolean): void { // 引数を受け取る
         const botEntity = this.worldKnowledge.getBotEntity();
         if (!botEntity) return;
 
@@ -201,7 +198,9 @@ export class BehaviorEngine {
             case 'followPlayer':
                 if (options && typeof options.targetPlayer === 'string') {
                     behaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, options as FollowPlayerOptions);
-                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                    if (behaviorInstance) { 
+                        behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                    }
                 } else {
                     console.error('FollowPlayer behavior requires a targetPlayer option (string).');
                 }
@@ -209,7 +208,9 @@ export class BehaviorEngine {
             case 'mineBlock':
                 if ((options && (options.blockId !== undefined || options.blockName !== undefined))) {
                     behaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, options as MineBlockOptions);
-                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                    if (behaviorInstance) {
+                        behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                    }
                 } else {
                     console.error('MineBlock behavior requires either blockId or blockName option.');
                 }
@@ -217,9 +218,11 @@ export class BehaviorEngine {
             case 'combat':
                 if (options && options.targetMobName) {
                     behaviorInstance = new CombatBehavior(this.bot, this.worldKnowledge, options as CombatOptions);
-                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
-                    if (behaviorStarted && behaviorInstance) {
-                        this.monitorBehaviorCompletion(behaviorInstance, behaviorName);
+                    if (behaviorInstance) {
+                        behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                        if (behaviorStarted) {
+                            this.monitorBehaviorCompletion(behaviorInstance, behaviorName);
+                        }
                     }
                 } else {
                     console.error('Combat behavior requires a targetMobName option (string).');
