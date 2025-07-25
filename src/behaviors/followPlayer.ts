@@ -1,17 +1,18 @@
-// src/behaviors/followPlayer.ts
+// src/behaviors/followPlayer.ts (修正版 - ターゲット認識ログ強化)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
 import { goals } from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
+import { BehaviorName } from '../services/BehaviorEngine';
 
 /**
  * プレイヤー追従行動のオプションインターフェース
  */
 export interface FollowPlayerOptions {
-    targetPlayer: string; // 追従するプレイヤー名
-    distanceThreshold?: number; // プレイヤーに近づく目標距離 (デフォルト: 2ブロック)
-    recheckInterval?: number; // 追従ロジックを再確認する間隔 (ミリ秒、デフォルト: 500ms)
+    targetPlayer: string;
+    distanceThreshold?: number;
+    recheckInterval?: number;
 }
 
 /**
@@ -20,52 +21,42 @@ export interface FollowPlayerOptions {
 export class FollowPlayerBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
-    private options: FollowPlayerOptions;
+    private options: Required<FollowPlayerOptions>;
     private intervalId: NodeJS.Timeout | null = null;
     private isActive: boolean = false;
+    private isPaused: boolean = false;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: FollowPlayerOptions) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
+        
         this.options = {
-            distanceThreshold: 2, // デフォルト値
-            recheckInterval: 500, // デフォルト値
-            ...options,
+            targetPlayer: options.targetPlayer,
+            distanceThreshold: options.distanceThreshold ?? 2,
+            recheckInterval: options.recheckInterval ?? 500,
         };
-        console.log(`FollowPlayerBehavior initialized for target: ${this.options.targetPlayer}`);
+
+        console.log(`FollowPlayerBehavior initialized for target: ${this.options.targetPlayer} (Distance: ${this.options.distanceThreshold}, Interval: ${this.options.recheckInterval})`);
     }
 
-    /**
-     * 追従行動を開始します。
-     * @returns 成功した場合true、失敗した場合false
-     */
     public start(): boolean {
         if (this.isActive) {
             console.warn('FollowPlayerBehavior is already active.');
             return false;
         }
 
-        const targetPlayer = this.worldKnowledge.getPlayer(this.options.targetPlayer);
-        if (!targetPlayer) {
-            console.error(`FollowPlayerBehavior: Target player "${this.options.targetPlayer}" not found. Cannot start.`);
-            return false;
-        }
-
+        // ここではターゲットの存在チェックをしない。executeFollowLogicで行う。
+        // そうしないと、プレイヤーがまだログインしていない場合に start() が失敗してしまう。
         this.isActive = true;
+        this.isPaused = false;
         console.log(`Starting FollowPlayerBehavior for ${this.options.targetPlayer}...`);
         
-        // 定期的に追従ロジックを実行
         this.intervalId = setInterval(() => this.executeFollowLogic(), this.options.recheckInterval);
-
-        // 初回実行
-        this.executeFollowLogic();
+        this.executeFollowLogic(); // 初回実行
 
         return true;
     }
 
-    /**
-     * 追従行動を停止します。
-     */
     public stop(): void {
         if (!this.isActive) {
             console.warn('FollowPlayerBehavior is not active. Cannot stop.');
@@ -74,65 +65,82 @@ export class FollowPlayerBehavior {
 
         console.log(`Stopping FollowPlayerBehavior for ${this.options.targetPlayer}.`);
         this.isActive = false;
+        this.isPaused = false;
         if (this.intervalId) {
             clearInterval(this.intervalId);
             this.intervalId = null;
         }
-        this.worldKnowledge.stopPathfinding(); // 経路探索も停止
-        this.bot.clearControlStates(); // ボットの制御状態をリセット
+        this.worldKnowledge.stopPathfinding();
+        this.bot.clearControlStates();
     }
 
-    /**
-     * 行動が現在アクティブかどうかを返します。
-     */
     public isRunning(): boolean {
-        return this.isActive;
+        return this.isActive && !this.isPaused;
     }
 
-    /**
-     * プレイヤー追従のメインロジック。定期的に呼び出されます。
-     */
+    public pause(): void {
+        if (!this.isActive || this.isPaused) return;
+        console.log(`FollowPlayerBehavior: Pausing for ${this.options.targetPlayer}.`);
+        this.isPaused = true;
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        this.worldKnowledge.stopPathfinding();
+        this.bot.clearControlStates();
+    }
+
+    public resume(): void {
+        if (!this.isActive || !this.isPaused) return;
+        console.log(`FollowPlayerBehavior: Resuming for ${this.options.targetPlayer}.`);
+        this.isPaused = false;
+        this.intervalId = setInterval(() => this.executeFollowLogic(), this.options.recheckInterval);
+        this.executeFollowLogic();
+    }
+
+    public canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean {
+        return higherPriorityBehavior === 'combat';
+    }
+
+    public getOptions(): FollowPlayerOptions {
+        return this.options;
+    }
+
     private async executeFollowLogic(): Promise<void> {
-        if (!this.isActive) return;
+        if (!this.isActive || this.isPaused) return;
 
         const targetPlayer = this.worldKnowledge.getPlayer(this.options.targetPlayer);
         const botEntity = this.worldKnowledge.getBotEntity();
 
-        if (!targetPlayer || !targetPlayer.position || !botEntity || !botEntity.position) {
-            console.warn(`FollowPlayerBehavior: Target player "${this.options.targetPlayer}" or bot not found. Stopping.`);
-            this.stop(); // ターゲットが見つからない場合は停止
+        if (!botEntity || !botEntity.position) {
+            console.warn(`FollowPlayerBehavior: Bot entity information not available. Stopping.`);
+            this.stop();
             return;
+        }
+
+        if (!targetPlayer || !targetPlayer.position) {
+            console.log(`FollowPlayerBehavior: Target player "${this.options.targetPlayer}" not found in world knowledge or has no position. Waiting for player to appear.`);
+            // プレイヤーが見つからない場合、ストップせずに待機を続ける
+            // 一定回数待機しても見つからない場合は停止するロジックも追加可能
+            return; 
         }
 
         const distance = botEntity.position.distanceTo(targetPlayer.position);
 
-        if (distance <= this.options.distanceThreshold!) {
-            // 十分近い場合、移動を停止し、プレイヤーの方を向く
+        if (distance <= this.options.distanceThreshold) {
+            console.log(`FollowPlayerBehavior: Bot is close enough to ${this.options.targetPlayer} (${distance.toFixed(2)} blocks). Staying put.`);
             this.worldKnowledge.stopPathfinding();
             this.bot.clearControlStates();
             this.bot.lookAt(targetPlayer.position.offset(0, targetPlayer.health ? targetPlayer.health / 2 : 1.6, 0), true);
-            // console.log(`Bot is close to ${this.options.targetPlayer}. Staying put.`);
         } else {
-            // 遠い場合、経路を計算して移動
+            console.log(`FollowPlayerBehavior: Moving towards ${this.options.targetPlayer} at ${targetPlayer.position} (Distance: ${distance.toFixed(2)}).`);
             const goal = new goals.GoalNear(
                 targetPlayer.position.x,
                 targetPlayer.position.y,
                 targetPlayer.position.z,
-                this.options.distanceThreshold! // 目標距離
+                this.options.distanceThreshold
             );
-            
-            // Pathfinderに新しい目標を設定 (既に移動中ならキャンセルして再計算)
-            // findPathがPromiseを返すので、awaitを使って完了を待つことができますが、
-            // ここでは定期実行なので、単純にsetGoalを呼び出すだけで良い場合が多いです。
-            // BehaviorEngineのループでパスの進捗を監視する方が適切です。
             this.bot.pathfinder.setGoal(goal);
-            // console.log(`Bot pathfinding to ${this.options.targetPlayer} at ${targetPlayer.position}, distance: ${distance.toFixed(2)}`);
         }
-
-        // ここに、追従中に他の行動（例: 敵との遭遇）を判断するロジックを追加できる
-        // if (this.worldKnowledge.findNearestEnemy(botEntity.position, 10)) {
-        //     this.behaviorEngine.startBehavior('combat', { target: enemyEntity });
-        //     this.stop(); // 戦闘に切り替えるため、追従を停止
-        // }
     }
 }

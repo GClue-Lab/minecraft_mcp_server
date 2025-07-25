@@ -1,4 +1,4 @@
-// src/types/mcp.d.ts (修正版)
+// src/types/mcp.d.ts (最終版 - AttackMobCommandにmaxAttemptsを追加)
 
 /**
  * MCPサーバーが受け取る基本的なコマンド構造
@@ -14,6 +14,8 @@ export interface BaseMcpCommand {
 export interface FollowPlayerCommand extends BaseMcpCommand {
     type: 'followPlayer';
     targetPlayer: string; // 追従するプレイヤー名
+    distanceThreshold?: number; // 追加: プレイヤーに近づく目標距離
+    recheckInterval?: number;   // 追加: 追従ロジックを再確認する間隔 (ミリ秒)
 }
 
 /**
@@ -32,14 +34,48 @@ export interface GetStatusCommand extends BaseMcpCommand {
 }
 
 /**
- * 'mineBlock' コマンドの型定義 (新規追加)
+ * 'mineBlock' コマンドの型定義
  */
 export interface MineBlockCommand extends BaseMcpCommand {
     type: 'mineBlock';
-    blockId?: number;     // 採掘するブロックのID（例: 1 for Stone, 17 for Oak Log）
-    blockName?: string;   // 採掘するブロックの名前（例: 'stone', 'oak_log'）
-    quantity?: number;    // 採掘する個数 (デフォルト: 1個)
-    maxDistance?: number; // 検索する最大距離 (デフォルト: 32ブロック)
+    blockId?: number | null;
+    blockName?: string | null;
+    quantity?: number;
+    maxDistance?: number;
+}
+
+/**
+ * 'attackMob' コマンドの型定義
+ */
+export interface AttackMobCommand extends BaseMcpCommand {
+    type: 'attackMob';
+    targetMobName?: string; // 例: 'zombie', 'skeleton'
+    maxCombatDistance?: number; // ターゲットを探す最大距離
+    attackRange?: number; // ターゲットに近づく距離 (攻撃できる距離)
+    stopAfterKill?: boolean; // 1体倒したら停止するかどうか
+    maxAttempts?: number; // <<<< ここが重要: これが存在するか確認します <<<<
+}
+
+/**
+ * 'stop' コマンドの型定義
+ */
+export interface StopCommand extends BaseMcpCommand {
+    type: 'stop'; // 現在実行中の行動を停止する
+}
+
+/**
+ * 'connect' コマンドの型定義
+ */
+export interface ConnectCommand extends BaseMcpCommand {
+    type: 'connect';
+}
+
+/**
+ * 'setCombatMode' コマンドの型定義
+ */
+export interface SetCombatModeCommand extends BaseMcpCommand {
+    type: 'setCombatMode';
+    mode: 'on' | 'off'; // 'on' で警戒モードON, 'off' でOFF
 }
 
 
@@ -50,7 +86,11 @@ export type McpCommand =
     | FollowPlayerCommand
     | SendMessageCommand
     | GetStatusCommand
-    | MineBlockCommand; // 新しいコマンドを追加
+    | MineBlockCommand
+    | AttackMobCommand
+    | StopCommand
+    | ConnectCommand
+    | SetCombatModeCommand;
 
 /**
  * MCPサーバーからの基本的な応答構造

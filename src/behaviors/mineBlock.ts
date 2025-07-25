@@ -1,20 +1,20 @@
-// src/behaviors/mineBlock.ts (最終修正版 - registryアクセスでanyを使用)
+// src/behaviors/mineBlock.ts (最終最終最終修正版 - blockId undefinedチェック)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
 import { goals } from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
-import { Block } from 'prismarine-block'; // Blockクラスを直接インポート（これが問題ない前提）
+import { Block } from 'prismarine-block';
+import { BehaviorName } from '../services/BehaviorEngine';
 
-// mineflayer.Bot.registry.blocks の要素の型は直接定義せず、anyで扱う
-// type MineflayerRegistryBlockInfo = mineflayer.BlockType; // 削除またはコメントアウト
+type MineflayerRegistryBlockInfo = any; 
 
 /**
  * ブロック採掘行動のオプションインターフェース
  */
 export interface MineBlockOptions {
-    blockId?: number;
-    blockName?: string;
+    blockId?: number | null;
+    blockName?: string | null;
     quantity?: number;
     maxDistance?: number;
 }
@@ -25,30 +25,34 @@ export interface MineBlockOptions {
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
-    private options: MineBlockOptions;
+    private options: {
+        blockId: number | undefined;
+        blockName: string | undefined;
+        quantity: number;
+        maxDistance: number;
+    };
     private isActive: boolean = false;
+    private isPaused: boolean = false;
     private currentTargetBlock: Block | null = null;
     private minedCount: number = 0;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: MineBlockOptions) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
+        
         this.options = {
-            quantity: 1,
-            maxDistance: 32,
-            ...options,
+            quantity: options.quantity ?? 1,
+            maxDistance: options.maxDistance ?? 32,
+            blockId: options.blockId ?? undefined,
+            blockName: options.blockName ?? undefined,
         };
 
-        if (!this.options.blockId && !this.options.blockName) {
+        if (this.options.blockId === undefined && this.options.blockName === undefined) {
             throw new Error('MineBlockBehavior requires either blockId or blockName option.');
         }
         console.log(`MineBlockBehavior initialized for target: ${this.options.blockName || this.options.blockId} (quantity: ${this.options.quantity})`);
     }
 
-    /**
-     * 採掘行動を開始します。
-     * @returns 成功した場合true、失敗した場合false
-     */
     public async start(): Promise<boolean> {
         if (this.isActive) {
             console.warn('MineBlockBehavior is already active.');
@@ -56,15 +60,13 @@ export class MineBlockBehavior {
         }
 
         this.isActive = true;
-        this.minedCount = 0; // 採掘数をリセット
+        this.isPaused = false;
+        this.minedCount = 0;
         console.log(`Starting MineBlockBehavior for ${this.options.blockName || this.options.blockId}...`);
 
-        return this.executeMineLogic(); // 初回実行と継続ロジック
+        return this.executeMineLogic();
     }
 
-    /**
-     * 採掘行動を停止します。
-     */
     public stop(): void {
         if (!this.isActive) {
             console.warn('MineBlockBehavior is not active. Cannot stop.');
@@ -73,32 +75,54 @@ export class MineBlockBehavior {
 
         console.log(`Stopping MineBlockBehavior.`);
         this.isActive = false;
-        this.bot.clearControlStates(); // ボットの制御状態をリセット
-        this.worldKnowledge.stopPathfinding(); // 経路探索も停止
+        this.isPaused = false;
+        this.bot.clearControlStates();
+        this.worldKnowledge.stopPathfinding();
         this.currentTargetBlock = null;
     }
 
-    /**
-     * 行動が現在アクティブかどうかを返します。
-     */
     public isRunning(): boolean {
-        return this.isActive;
+        return this.isActive && !this.isPaused;
     }
 
-    /**
-     * ブロック採掘のメインロジック。
-     */
+    public pause(): void {
+        if (!this.isActive || this.isPaused) return;
+        console.log(`MineBlockBehavior: Pausing.`);
+        this.isPaused = true;
+        this.worldKnowledge.stopPathfinding();
+        this.bot.clearControlStates();
+    }
+
+    public resume(): void {
+        if (!this.isActive || !this.isPaused) return;
+        console.log(`MineBlockBehavior: Resuming.`);
+        this.isPaused = false;
+        this.executeMineLogic();
+    }
+
+    public canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean {
+        return higherPriorityBehavior === 'combat';
+    }
+
+    public getOptions(): MineBlockOptions {
+        return {
+            blockId: this.options.blockId,
+            blockName: this.options.blockName,
+            quantity: this.options.quantity,
+            maxDistance: this.options.maxDistance
+        };
+    }
+
     private async executeMineLogic(): Promise<boolean> {
-        while (this.isActive && this.minedCount < this.options.quantity!) {
+        while (this.isActive && !this.isPaused && this.minedCount < this.options.quantity!) {
             console.log(`MineBlockBehavior: Looking for target block. Mined: ${this.minedCount}/${this.options.quantity}`);
             
             let blockIdsToFind: number[] = [];
-            if (this.options.blockId) {
+            // ここを修正: this.options.blockId が undefined でないことを確認し、number型に絞り込む
+            if (typeof this.options.blockId === 'number') {
                 blockIdsToFind.push(this.options.blockId);
-            } else if (this.options.blockName) {
-                // registry.blocks の値は any 型として扱う
-                // これにより、TypeScriptの型チェックを回避し、ランタイムの動作に任せる
-                const blockByName = (Object.values(this.bot.registry.blocks) as any[]).find(
+            } else if (typeof this.options.blockName === 'string') { // string型であることを確認
+                const blockByName = (Object.values(this.bot.registry.blocks) as MineflayerRegistryBlockInfo[]).find(
                     (b: any) => b.name === this.options.blockName
                 );
                 
@@ -109,14 +133,16 @@ export class MineBlockBehavior {
                     this.stop();
                     return false;
                 }
+            } else {
+                this.stop();
+                return false;
             }
 
-            // 最寄りのターゲットブロックを見つける
             const targetBlock = this.worldKnowledge.findNearestBlock(blockIdsToFind, this.options.maxDistance!);
 
             if (!targetBlock) {
-                console.warn(`MineBlockBehavior: No target block (${this.options.blockName || this.options.blockId}) found within ${this.options.maxDistance} blocks.`);
-                this.stop(); // 見つからない場合は停止
+                console.warn(`MineBlockBehavior: No target block (${this.options.blockName || this.options.blockId}) found within ${this.options.maxDistance} blocks. Stopping.`);
+                this.stop();
                 return false;
             }
 
@@ -126,7 +152,6 @@ export class MineBlockBehavior {
             const botPosition = this.bot.entity.position;
             const targetPos = targetBlock.position;
 
-            // ブロックに到達するための経路を見つける
             const pathResult = await this.worldKnowledge.findPath(botPosition, targetPos, 1);
 
             if (!pathResult) {
@@ -135,7 +160,6 @@ export class MineBlockBehavior {
                 continue;
             }
             
-            // 採掘できる状態にあるか確認
             if (!this.bot.canDigBlock(targetBlock)) {
                 console.warn(`MineBlockBehavior: Cannot dig block ${targetBlock.displayName} at ${targetBlock.position}. Skipping.`);
                 this.currentTargetBlock = null; 
@@ -143,7 +167,6 @@ export class MineBlockBehavior {
                 continue;
             }
 
-            // 採掘する
             try {
                 console.log(`MineBlockBehavior: Digging ${targetBlock.displayName} at ${targetBlock.position}...`);
                 await this.bot.dig(targetBlock);

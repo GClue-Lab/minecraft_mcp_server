@@ -1,8 +1,8 @@
-// src/services/CommandHandler.ts (修正版)
+// src/services/CommandHandler.ts (修正版 - followPlayerオプションを明示的に渡す)
 
-import { BotManager, BotStatus } from './BotManager';
-import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
-import { BehaviorEngine, BehaviorName } from './BehaviorEngine';
+import * as mineflayer from 'mineflayer';
+import { Vec3 } from 'vec3';
+
 import {
     McpCommand,
     McpResponse,
@@ -11,15 +11,23 @@ import {
     FollowPlayerCommand,
     SendMessageCommand,
     GetStatusCommand,
-    MineBlockCommand, // 追加
+    MineBlockCommand,
+    AttackMobCommand,
+    StopCommand,
+    ConnectCommand,
+    SetCombatModeCommand,
     BaseMcpCommand
 } from '../types/mcp';
-import * as mineflayer from 'mineflayer';
-import { Vec3 } from 'vec3';
 
-/**
- * LLMからのMCPコマンドを処理し、Mineflayerボットの動作に変換するクラス
- */
+import { BotManager, BotStatus } from './BotManager';
+import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
+import { BehaviorEngine, BehaviorName, CurrentBehavior } from './BehaviorEngine';
+
+import { FollowPlayerOptions } from '../behaviors/followPlayer';
+import { MineBlockOptions } from '../behaviors/mineBlock';
+import { CombatOptions } from '../behaviors/combat';
+
+
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
@@ -40,166 +48,171 @@ export class CommandHandler {
         this.behaviorEngine = be;
     }
 
-    /**
-     * MCPコマンドを処理します。
-     * @param command LLMから受け取ったMCPコマンド
-     * @returns 処理結果を示すMcpResponse
-     */
     public async handleCommand(command: McpCommand): Promise<McpResponse> {
-        console.log(`Handling command: ${command.type} (ID: ${command.id || 'N/A'})`);
+        console.log(`Handling command: ${command.type} (ID: ${command.id})`);
+
+        if (command.type === 'connect') {
+            try {
+                await this.botManager.connect();
+                return this.createSuccessResponse(command.id, 'Bot connection initiated. Please wait for spawn.');
+            } catch (error: any) {
+                return this.createErrorResponse(command.id, `Failed to connect bot: ${error.message || 'Unknown error'}`);
+            }
+        }
+
+        if (command.type === 'setCombatMode') {
+            return this.handleSetCombatMode(command as SetCombatModeCommand);
+        }
 
         const bot = this.botManager.getBot();
-        if (!bot || this.botManager.getStatus() !== 'connected') {
+        if (!bot) {
             return this.createErrorResponse(
                 command.id,
-                `Bot is not connected. Current status: ${this.botManager.getStatus()}. Some commands require a connected bot.`
+                `Bot is not connected. Current status: ${this.botManager.getStatus()}. Please use 'connect' command first or wait for automatic connection.`
             );
         }
 
         if (!this.worldKnowledge || !this.behaviorEngine) {
-            return this.createErrorResponse(
-                command.id,
-                `Core services (WorldKnowledge/BehaviorEngine) not yet initialized. Please wait for bot connection.`
-            );
+            if (['followPlayer', 'mineBlock', 'attackMob', 'stop', 'sendMessage'].includes(command.type)) {
+                return this.createErrorResponse(
+                    command.id,
+                    `Core services (WorldKnowledge/BehaviorEngine) not yet initialized. Please wait for bot connection.`
+                );
+            }
         }
 
         try {
             switch (command.type) {
-                case 'followPlayer':
-                    return await this.handleFollowPlayer(bot, command as FollowPlayerCommand);
                 case 'sendMessage':
                     return await this.handleSendMessage(bot, command as SendMessageCommand);
                 case 'getStatus':
                     return this.handleGetStatus(bot, command as GetStatusCommand);
-                case 'mineBlock': // 新しいコマンドの処理を追加
-                    return await this.handleMineBlock(bot, command as MineBlockCommand);
+                case 'followPlayer': // ここを修正
+                    return await this.handleFollowPlayer(command as FollowPlayerCommand);
+                case 'mineBlock':
+                    return await this.handleMineBlock(command as MineBlockCommand);
+                case 'attackMob':
+                    return await this.handleAttackMob(command as AttackMobCommand);
+                case 'stop':
+                    return this.handleStop(command as StopCommand);
                 default:
                     const unknownCommand = command as BaseMcpCommand;
                     return this.createErrorResponse(unknownCommand.id, `Unknown command type: ${unknownCommand.type}`);
             }
         } catch (error: any) {
-            console.error(`Error processing command ${command.type} (ID: ${command.id || 'N/A'}):`, error);
+            console.error(`Error processing command ${command.type} (ID: ${command.id}):`, error);
             return this.createErrorResponse(command.id, `Failed to execute command: ${error.message || 'Unknown error'}`, error);
         }
     }
 
-    /**
-     * 'followPlayer' コマンドを処理します。
-     * BehaviorEngineに処理を委譲します。
-     */
-    private async handleFollowPlayer(bot: mineflayer.Bot, command: FollowPlayerCommand): Promise<McpResponse> {
-        const { targetPlayer } = command;
+    private handleGetStatus(bot: mineflayer.Bot | null, command: GetStatusCommand): McpResponse {
+        const botStatus = this.botManager.getStatus();
+        const botPosition = bot ? bot.entity.position : null;
+        const currentBehavior = this.behaviorEngine?.getCurrentBehavior();
 
-        if (!this.worldKnowledge || !this.behaviorEngine) {
-             return this.createErrorResponse(command.id, `Internal error: WorldKnowledge or BehaviorEngine not available.`);
-        }
+        const status: {
+            botStatus: BotStatus;
+            botHealth: number | null;
+            botFood: number | null;
+            botPosition: Vec3 | null;
+            currentBehavior: CurrentBehavior | null | undefined;
+            nearbyPlayers: WorldEntity[];
+            nearbyHostileMobs: WorldEntity[];
+        } = {
+            botStatus: botStatus,
+            botHealth: bot?.health !== undefined ? bot.health : null,
+            botFood: bot?.food !== undefined ? bot.food : null,
+            botPosition: botPosition,
+            currentBehavior: currentBehavior,
+            nearbyPlayers: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => e.type === 'player' && e.id !== bot?.entity.id && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
+            nearbyHostileMobs: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob' || e.type === 'object') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
+        };
+        console.log('[STATUS] Bot status requested.');
+        return this.createSuccessResponse(command.id, 'Current bot status.', status);
+    }
 
-        const playerEntity = this.worldKnowledge.getPlayer(targetPlayer);
-        if (!playerEntity) {
-            return this.createErrorResponse(command.id, `Player "${targetPlayer}" not found in current world knowledge.`);
-        }
-
-        const started = await this.behaviorEngine.startBehavior('followPlayer', { targetPlayer: targetPlayer });
-
+    // ここを修正: followPlayerコマンドのオプションを明示的に渡す
+    private async handleFollowPlayer(command: FollowPlayerCommand): Promise<McpResponse> {
+        if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
+        const options: FollowPlayerOptions = {
+            targetPlayer: command.targetPlayer,
+            distanceThreshold: command.distanceThreshold !== undefined ? command.distanceThreshold : undefined, // ここを修正
+            recheckInterval: command.recheckInterval !== undefined ? command.recheckInterval : undefined,     // ここを修正
+        };
+        const started = await this.behaviorEngine.startBehavior('followPlayer', options);
         if (started) {
-            return this.createSuccessResponse(command.id, `Attempting to follow player: ${targetPlayer}`);
+            return this.createSuccessResponse(command.id, `Attempting to follow player: ${command.targetPlayer}.`);
         } else {
-            return this.createErrorResponse(command.id, `Failed to start followPlayer behavior for ${targetPlayer}.`);
+            return this.createErrorResponse(command.id, `Failed to start following player: ${command.targetPlayer}.`);
         }
     }
 
-    /**
-     * 'sendMessage' コマンドを処理します。
-     */
     private async handleSendMessage(bot: mineflayer.Bot, command: SendMessageCommand): Promise<McpResponse> {
         const { message } = command;
         if (!message || message.trim() === '') {
             return this.createErrorResponse(command.id, 'Message cannot be empty.');
         }
 
-        console.log(`[CHAT] Sending message: ${message}`);
+        console.log(`[CHAT] Sending message: "${message}"`);
         bot.chat(message);
 
         return this.createSuccessResponse(command.id, `Message sent: "${message}"`);
     }
 
-    /**
-     * 'mineBlock' コマンドを処理します (新規追加)。
-     * BehaviorEngineに処理を委譲します。
-     */
-    private async handleMineBlock(bot: mineflayer.Bot, command: MineBlockCommand): Promise<McpResponse> {
-        const { blockId, blockName, quantity, maxDistance } = command;
-
-        if (!this.worldKnowledge || !this.behaviorEngine) {
-            return this.createErrorResponse(command.id, `Internal error: WorldKnowledge or BehaviorEngine not available.`);
-        }
-
-        if (!blockId && !blockName) {
-            return this.createErrorResponse(command.id, 'MineBlock command requires either blockId or blockName.');
-        }
-
-        const started = await this.behaviorEngine.startBehavior('mineBlock', { blockId, blockName, quantity, maxDistance });
-
+    private async handleMineBlock(command: MineBlockCommand): Promise<McpResponse> {
+        if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
+        const options: MineBlockOptions = {
+            blockId: command.blockId !== undefined ? command.blockId : undefined, // ここを修正
+            blockName: command.blockName !== undefined ? command.blockName : undefined, // ここを修正
+            quantity: command.quantity !== undefined ? command.quantity : undefined, // ここを修正
+            maxDistance: command.maxDistance !== undefined ? command.maxDistance : undefined, // ここを修正
+        };
+        const started = await this.behaviorEngine.startBehavior('mineBlock', options);
         if (started) {
-            const targetInfo = blockName ? blockName : (blockId ? `ID:${blockId}` : 'unknown block');
-            return this.createSuccessResponse(command.id, `Attempting to mine ${quantity || 1} of ${targetInfo}.`);
+            const targetInfo = options.blockName ? options.blockName : (options.blockId ? `ID:${options.blockId}` : 'unknown block');
+            return this.createSuccessResponse(command.id, `Attempting to mine ${options.quantity || 1} of ${targetInfo}.`);
         } else {
-            return this.createErrorResponse(command.id, `Failed to start mineBlock behavior.`);
+            const targetInfo = options.blockName ? options.blockName : (options.blockId ? `ID:${options.blockId}` : 'unknown block');
+            return this.createErrorResponse(command.id, `Failed to start mining ${targetInfo}.`);
         }
     }
 
-
-    /**
-     * 'getStatus' コマンドを処理します。
-     */
-    private handleGetStatus(bot: mineflayer.Bot, command: GetStatusCommand): McpResponse {
-        if (!this.worldKnowledge || !this.behaviorEngine) {
-            return this.createErrorResponse(command.id, `Internal error: WorldKnowledge or BehaviorEngine not available for status.`);
-        }
-
-        const botEntity = this.worldKnowledge.getBotEntity();
-        const status: {
-            botStatus: BotStatus;
-            botHealth: number | null;
-            botFood: number | null;
-            botPosition: Vec3 | null;
-            currentBehavior: BehaviorName | null;
-            nearbyPlayers: WorldEntity[];
-            nearbyHostileMobs: WorldEntity[];
-        } = {
-            botStatus: this.botManager.getStatus(),
-            botHealth: bot.health !== undefined ? bot.health : null,
-            botFood: bot.food !== undefined ? bot.food : null,
-            botPosition: botEntity ? botEntity.position : null,
-            currentBehavior: this.behaviorEngine.getCurrentBehavior()?.name || null,
-            nearbyPlayers: this.worldKnowledge.getAllEntities().filter(e => e.type === 'player' && e.id !== bot.entity.id && bot.entity.position.distanceTo(e.position) < 50),
-            nearbyHostileMobs: this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob' || e.type === 'object') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && bot.entity.position.distanceTo(e.position) < 50),
+    private async handleAttackMob(command: AttackMobCommand): Promise<McpResponse> {
+        if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
+        const options: CombatOptions = {
+            targetMobName: command.targetMobName,
+            maxCombatDistance: command.maxCombatDistance !== undefined ? command.maxCombatDistance : undefined,
+            attackRange: command.attackRange !== undefined ? command.attackRange : undefined,
+            stopAfterKill: command.stopAfterKill !== undefined ? command.stopAfterKill : undefined,
+            maxAttempts: command.maxAttempts !== undefined ? command.maxAttempts : undefined,
         };
-        console.log('[STATUS] Bot status requested.');
-        return this.createSuccessResponse(command.id, 'Current bot status.', status);
+        const started = await this.behaviorEngine.startBehavior('combat', options);
+        if (started) {
+            return this.createSuccessResponse(command.id, `Attempting to attack mob: ${options.targetMobName}.`);
+        } else {
+            return this.createErrorResponse(command.id, `Failed to start attacking mob: ${options.targetMobName}.`);
+        }
     }
 
-    /**
-     * 成功応答オブジェクトを生成します。
-     */
+    private handleSetCombatMode(command: SetCombatModeCommand): McpResponse {
+        if (!this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `BehaviorEngine not initialized. Cannot set combat mode.`);
+        }
+        this.behaviorEngine.setCombatMode(command.mode === 'on');
+        return this.createSuccessResponse(command.id, `Combat Mode set to ${command.mode.toUpperCase()}.`);
+    }
+
+    private handleStop(command: StopCommand): McpResponse {
+        if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
+        this.behaviorEngine.stopCurrentBehavior();
+        return this.createSuccessResponse(command.id, 'Current behavior stopped.');
+    }
+
     private createSuccessResponse(commandId: string | undefined, message: string, data?: any): SuccessMcpResponse {
-        return {
-            status: 'success',
-            commandId: commandId,
-            message: message,
-            data: data
-        };
+        return { status: 'success', commandId, message, data };
     }
 
-    /**
-     * エラー応答オブジェクトを生成します。
-     */
     private createErrorResponse(commandId: string | undefined, message: string, details?: any): ErrorMcpResponse {
-        return {
-            status: 'error',
-            commandId: commandId,
-            message: message,
-            details: details instanceof Error ? details.message : details
-        };
+        return { status: 'error', commandId, message, details: details instanceof Error ? details.message : details };
     }
 }

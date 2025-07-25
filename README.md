@@ -1,6 +1,15 @@
 # minecraft_mcp_server
 minecraft mcp server
 
+
+ログイン(周辺状況の確認でもログインするよ)
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "connect", "id": "initiate-connection" }' \
+     http://192.168.1.25:3000/command
+```
+
+
 周辺状況の確認
 ```
 curl -X POST -H "Content-Type: application/json" \
@@ -10,12 +19,6 @@ curl -X POST -H "Content-Type: application/json" \
 
 
 プレイヤーを追従する
-```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "followPlayer", "targetPlayer": "YourMinecraftPlayer", "id": "test-follow-behavior" }' \
-     http://localhost:3000/command
-```
-
 ```
 curl -X POST -H "Content-Type: application/json" \
      -d '{ "type": "followPlayer", "targetPlayer": "naisy714", "id": "test-follow-behavior" }' \
@@ -29,6 +32,15 @@ curl -X POST -H "Content-Type: application/json" \
      -d '{ "type": "mineBlock", "blockId": 1, "quantity": 1, "id": "mine-stone-one" }' \
      http://192.168.1.45:3000/command
 ```
+
+ゾンビ警戒モード
+* プレイヤーを追従中に警戒モードがONでゾンビが現れたら、自動的にゾンビ退治が割り込み、倒し終えたら追従に戻ります。
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "setCombatMode", "mode": "on", "id": "enable-combat-mode" }' \
+     http://192.168.1.25:3000/command
+```
+
 
 ```
 git clone https://github.com/GClue-Lab/minecraft_mcp_server

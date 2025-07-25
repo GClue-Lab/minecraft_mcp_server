@@ -1,4 +1,4 @@
-// src/services/WorldKnowledge.ts (最終修正版 - findPathのPromise解決)
+// src/services/WorldKnowledge.ts (修正版 - setBotInstanceを追加)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
@@ -30,7 +30,36 @@ export class WorldKnowledge {
         console.log('WorldKnowledge initialized. Monitoring world events...');
     }
 
+    // 新規追加: ボットインスタンスを更新するメソッド
+    public setBotInstance(newBot: mineflayer.Bot): void {
+        // 古いリスナーを削除
+        if (this.bot) {
+            this.bot.removeAllListeners();
+        }
+        this.bot = newBot;
+        this.bot.loadPlugin(pathfinderPlugin); // 新しいボットにもプラグインをロード
+        this.setupEventListeners(); // 新しいボットでリスナーを再設定
+        this.clearKnowledge('Bot instance updated'); // 知識をクリア
+        console.log('WorldKnowledge: Bot instance updated and listeners re-setup.');
+    }
+
     private setupEventListeners(): void {
+        // イベントリスナーを登録する前に、既存のリスナーを全て削除 (念のため再確認)
+        // constructorやsetBotInstanceから呼ばれる際、常にクリーンな状態にする
+        if (this.bot) {
+            // bot.removeAllListeners() は全てのイベントリスナーを削除するため、
+            // setupEventListenersが呼ばれるたびに過去のリスナーが削除される。
+            // しかし、これが重複している原因ではない場合がある。
+            // もしBotManagerが既に一部リスナーを登録している場合、
+            // ここで削除してしまうとBotManagerの機能が損なわれる可能性がある。
+            // ここでの this.bot.removeAllListeners(); は setBotInstance() に任せる
+            // setupEventListeners() を呼ぶ前に bot にリスナーがないことを前提とする
+            // または、BotManagerのイベント購読はremoveAllListenersの影響を受けないように設計する
+            // 現在のBotManagerのリスナーはbotインスタンスを生成する際に once で登録されるため、
+            // ここで removeAllListeners を呼んでも問題ない。
+            this.bot.removeAllListeners(); // 既存の全てのリスナーを削除して重複登録を防ぐ
+        }
+        
         this.bot.on('entitySpawn', (entity: Entity) => this.handleEntitySpawn(entity));
         this.bot.on('entityGone', (entity: Entity) => this.handleEntityGone(entity));
         this.bot.on('entityMoved', (entity: Entity) => this.handleEntityMoved(entity));
@@ -41,7 +70,8 @@ export class WorldKnowledge {
         this.bot.on('kicked', (reason: string) => this.clearKnowledge(reason));
         this.bot.on('end', (reason: string) => this.clearKnowledge(reason));
 
-        this.bot.once('spawn', () => {
+        // once は一度発火すると自動的に削除されるため、重複登録の心配はない
+        this.bot.once('spawn', () => { 
             console.log('Bot spawned. Populating initial world knowledge.');
             for (const entityId in this.bot.entities) {
                 this.handleEntitySpawn(this.bot.entities[entityId] as Entity);
@@ -181,7 +211,7 @@ export class WorldKnowledge {
         }
 
         const goal = new goals.GoalNear(endPos.x, endPos.y, endPos.z, range);
-        this.bot.pathfinder.setGoal(goal); // ここで経路探索を開始
+        this.bot.pathfinder.setGoal(goal);
 
         console.log(`Pathfinding started towards ${endPos.x},${endPos.y},${endPos.z} (range: ${range})`);
 
@@ -194,15 +224,7 @@ export class WorldKnowledge {
 
             const onGoalReached = () => {
                 cleanUpListeners();
-                // 経路探索が成功したら、pathfinderから現在のパスデータを取得して解決
-                // bot.pathfinder.getPath() は引数を取らない場合が多いが、型定義によっては getPathTo(..) の可能性も
-                // mineflayer-pathfinderのPathfinderインターフェースはgetPathToのみを公開しているので、
-                // このPromiseを解決するために適切なPathオブジェクトを生成するか、
-                // 実際には null 以外の値を返す必要がない場合は、このままにするか検討が必要
-                // ここでは、パスが成功したという事実を null ではない値で示し、
-                // Path型を実装したオブジェクトがあればそれを返すとよいでしょう。
-                // 現状Pathオブジェクトの具体的なプロパティを使っていないため、nullではないオブジェクトを返します。
-                resolve({ result: 'success', movements: [] } as Path); // Path型に合わせて具体的なオブジェクトを返す
+                resolve({ result: 'success', movements: [] } as Path);
             };
             const onGoalCantBeReached = () => {
                 cleanUpListeners();
@@ -224,8 +246,6 @@ export class WorldKnowledge {
     public stopPathfinding(): void {
         if (this.bot.pathfinder) {
             this.bot.pathfinder.stop();
-            // イベントリスナーは findPath 内で once を使っているため自動的に削除される
-            // または cleanUpListeners() を明示的に呼び出すことで対応
             console.log("Pathfinding stopped.");
         }
     }

@@ -1,4 +1,4 @@
-// src/main.ts (修正版 - BehaviorEngineにBotManagerのイベントをセットアップ)
+// src/main.ts (修正版 - サービスの重複初期化防止)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -16,9 +16,9 @@ const MCP_SERVER_PORT = parseInt(process.env.MCP_SERVER_PORT || '3000', 10);
 // グローバルスコープでインスタンスを宣言（またはクラスでラップ）
 let commandHandler: CommandHandler;
 let mcpApi: McpApi;
-let worldKnowledge: WorldKnowledge;
-let behaviorEngine: BehaviorEngine;
-
+let worldKnowledge: WorldKnowledge | null = null; // null許容に
+let behaviorEngine: BehaviorEngine | null = null; // null許容に
+let botManagerInstance: BotManager; // BotManagerインスタンスを保持
 
 async function startMcpServer() {
     console.log('--- Starting Minecraft MCP Server ---');
@@ -27,25 +27,33 @@ async function startMcpServer() {
     console.log(`MCP API will listen on port: ${MCP_SERVER_PORT}`);
 
     try {
-        const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
+        botManagerInstance = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
 
-        commandHandler = new CommandHandler(botManager, null as any, null as any); // 初期はnullで型アサーション、後で設定
+        // CommandHandlerをまず初期化（BotManagerのみで動作する部分のために）
+        commandHandler = new CommandHandler(botManagerInstance, null, null); 
         mcpApi = new McpApi(commandHandler, MCP_SERVER_PORT);
         mcpApi.start();
         console.log('MCP API server started.');
 
 
-        // BotManagerの'spawn'イベントを購読し、ボットがスポーンしてから残りのサービスを初期化
-        botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
+        // BotManagerの'spawn'イベントを購読し、ボットがスポーンしたらコアサービスを初期化
+        // ただし、既に初期化されている場合はスキップする
+        botManagerInstance.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
+            if (worldKnowledge && behaviorEngine) {
+                console.log('Bot spawned again. Core services already initialized. Skipping re-initialization.');
+                // 既存のインスタンスにボットを再接続する処理（あれば）
+                worldKnowledge.setBotInstance(bot); // WorldKnowledgeにもボットインスタンスを更新するメソッドを追加
+                behaviorEngine.setBotInstance(bot); // BehaviorEngineにもボットインスタンスを更新するメソッドを追加
+                return;
+            }
+
             console.log('Bot spawned. Initializing WorldKnowledge and BehaviorEngine...');
 
             worldKnowledge = new WorldKnowledge(bot);
-            behaviorEngine = new BehaviorEngine(bot, worldKnowledge);
+            // BehaviorEngineのコンストラクタでBotManagerを受け取る
+            behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManagerInstance); 
             
-            // --- ここでBehaviorEngineにBotManagerのイベントをセットアップ ---
-            behaviorEngine.setupBotEvents(botManager); 
-            // --- End BehaviorEngineのイベントセットアップ ---
-
+            // CommandHandlerにWorldKnowledgeとBehaviorEngineのインスタンスをセット
             commandHandler.setWorldKnowledge(worldKnowledge);
             commandHandler.setBehaviorEngine(behaviorEngine);
 
@@ -54,7 +62,7 @@ async function startMcpServer() {
 
 
         // ボットの接続を試行
-        botManager.connect().catch(err => {
+        botManagerInstance.connect().catch(err => {
             console.error("Initial bot connection failed but server will continue to run and retry:", err.message);
         });
 

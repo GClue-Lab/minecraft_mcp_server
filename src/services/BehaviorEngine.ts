@@ -1,94 +1,198 @@
-// src/services/BehaviorEngine.ts (修正版 - 死亡/リスポーン時の行動停止)
+// src/services/BehaviorEngine.ts (修正版 - setBotInstanceを追加)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
 import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
 import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
+import { CombatBehavior, CombatOptions } from '../behaviors/combat';
 import { Vec3 } from 'vec3';
-import { BotManager } from './BotManager'; // BotManagerをインポート
+import { BotManager } from './BotManager';
 
-// 行動の種類を定義
-export type BehaviorName = 'followPlayer' | 'idle' | 'combat' | 'mineBlock';
+// 行動の種類と優先順位を定義
+export type BehaviorName = 'combat' | 'followPlayer' | 'mineBlock' | 'idle';
 
-/**
- * すべての行動クラスが実装すべき共通インターフェース
- * これにより、BehaviorEngineは型安全に行動を管理できる
- */
+const BEHAVIOR_PRIORITIES: { [key in BehaviorName]: number } = {
+    'combat': 0,        // 最優先
+    'followPlayer': 10,
+    'mineBlock': 20,
+    'idle': 100,        // 最低優先
+};
+
 interface BehaviorInstance {
-    start(): Promise<boolean> | boolean; // startメソッドはPromiseを返す可能性も考慮
+    start(): Promise<boolean> | boolean;
     stop(): void;
     isRunning(): boolean;
+    pause(): void;
+    resume(): void;
+    canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean;
+    getOptions(): any;
 }
 
-/**
- * 現在実行中の行動の状態
- */
 export interface CurrentBehavior {
     name: BehaviorName;
-    target?: string | number | Vec3; // ターゲット（プレイヤー名、エンティティID、座標など）
+    target?: string | number | Vec3 | null;
     isActive: boolean;
-    // 必要に応じて、行動固有のパラメータを追加
 }
 
-/**
- * ボットの高レベルな行動を管理するクラス
- */
 export class BehaviorEngine {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
+    private botManager: BotManager;
     private activeBehaviorInstances: { [key in BehaviorName]?: BehaviorInstance } = {};
-    private currentBehaviorName: BehaviorName | null = null; // 現在アクティブな行動の名前
+    private currentBehaviorName: BehaviorName | null = null;
+    private behaviorStack: BehaviorName[] = [];
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge) {
+    private interruptMonitorInterval: NodeJS.Timeout | null = null;
+    private readonly MONITOR_INTERVAL_MS = 500;
+    private combatModeEnabled: boolean = false;
+
+    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
+        this.botManager = botManager;
         console.log('BehaviorEngine initialized.');
+        this.setupBotEvents(botManager);
+        this.startInterruptMonitor();
     }
 
-    /**
-     * BotManagerからのイベントを購読するためのメソッド
-     * main.ts からボットインスタンスが生成された後に呼び出されることを想定
-     */
+    // 新規追加: ボットインスタンスを更新するメソッド
+    public setBotInstance(newBot: mineflayer.Bot): void {
+        this.bot = newBot;
+        // 既存の行動インスタンスも新しいボットインスタンスに再接続する必要があるが、
+        // 現状はコンストラクタでボットを受け取るため、 BehaviorEngine は再初期化される。
+        // もし BehaviorEngine が永続化されるなら、各 BehaviorInstance のボットも更新する必要がある。
+        // ここでは、新しいボットがBehaviorEngineに正しく設定されたことをログで示す。
+        console.log('BehaviorEngine: Bot instance updated.');
+    }
+
     public setupBotEvents(botManager: BotManager): void {
+        // ... (既存のイベントリスナーは変更なし) ...
         botManager.getBotInstanceEventEmitter().on('death', () => {
-            console.warn('BehaviorEngine: Bot died! Stopping current behavior.');
-            this.stopCurrentBehavior(); // 死亡時に現在の行動を強制停止
-            // LLMへの通知など、追加の死亡時処理をここに記述
+            console.warn('BehaviorEngine: Bot died! Stopping current behavior and clearing stack.');
+            this.stopCurrentBehavior();
+            this.behaviorStack = [];
         });
 
         botManager.getBotInstanceEventEmitter().on('respawn', () => {
-            console.log('BehaviorEngine: Bot respawned! Setting to idle behavior.');
-            this.startBehavior('idle'); // リスポーン後にアイドル行動を開始
-            // 必要に応じて、以前の行動を再開するかどうかを判断するロジックを記述
+            console.log('BehaviorEngine: Bot respawned! Starting idle behavior.');
+            this.startBehavior('idle');
+        });
+
+        this.bot.on('health', () => {
+            const botHealth = this.bot.health;
+            if (botHealth && botHealth < 20) {
+                this.tryInterruptForCombat(true);
+            }
         });
     }
 
+    private startInterruptMonitor(): void {
+        if (this.interruptMonitorInterval) {
+            clearInterval(this.interruptMonitorInterval);
+        }
+        this.interruptMonitorInterval = setInterval(() => {
+            if (this.combatModeEnabled) {
+                this.tryInterruptForCombat(false);
+            }
+        }, this.MONITOR_INTERVAL_MS);
+    }
 
-    /**
-     * 現在実行中の行動の名前と状態を取得します。
-     */
+    public setCombatMode(enabled: boolean): void {
+        this.combatModeEnabled = enabled;
+        console.log(`BehaviorEngine: Combat Mode set to ${enabled ? 'ON' : 'OFF'}.`);
+        if (enabled && this.currentBehaviorName !== 'combat') {
+            this.tryInterruptForCombat(false);
+        } else if (!enabled && this.currentBehaviorName === 'combat') {
+            console.log('BehaviorEngine: Combat Mode OFF. Stopping current combat behavior.');
+            this.stopCurrentBehavior();
+            this.resumePreviousBehavior();
+        }
+    }
+
+    private tryInterruptForCombat(forceInterrupt: boolean): void {
+        const botEntity = this.worldKnowledge.getBotEntity();
+        if (!botEntity) return;
+
+        const nearbyHostileMob = this.worldKnowledge.getAllEntities().find(e =>
+            e.type === 'mob' &&
+            e.isAlive &&
+            (e.name === 'zombie' || e.name === 'skeleton' || e.name === 'spider' || e.name === 'creeper' || e.name === 'enderman') &&
+            botEntity.position.distanceTo(e.position) <= (forceInterrupt ? 32 : 16)
+        );
+
+        if (nearbyHostileMob) {
+            const combatPriority = BEHAVIOR_PRIORITIES.combat;
+            const currentPriority = this.currentBehaviorName ? BEHAVIOR_PRIORITIES[this.currentBehaviorName] : BEHAVIOR_PRIORITIES.idle;
+
+            if (currentPriority > combatPriority || (forceInterrupt && this.currentBehaviorName !== 'combat')) {
+                 this.startBehavior('combat', { 
+                    targetMobName: nearbyHostileMob.name,
+                    stopAfterKill: true
+                });
+            } else if (this.currentBehaviorName === 'combat' && this.activeBehaviorInstances.combat?.isRunning()) {
+                const combatInstance = this.activeBehaviorInstances.combat as CombatBehavior;
+                if (!combatInstance.isRunning() || combatInstance.getOptions().targetMobName !== nearbyHostileMob.name) {
+                    this.startBehavior('combat', { 
+                        targetMobName: nearbyHostileMob.name,
+                        stopAfterKill: true
+                    });
+                }
+            }
+        }
+    }
+
     public getCurrentBehavior(): CurrentBehavior | null {
         if (this.currentBehaviorName && this.activeBehaviorInstances[this.currentBehaviorName]?.isRunning()) {
+            const instance = this.activeBehaviorInstances[this.currentBehaviorName];
+            
+            if (instance === undefined) { 
+                return null; 
+            }
+
+            let targetInfo: string | number | Vec3 | null | undefined;
+
+            const options = instance.getOptions();
+            if (this.currentBehaviorName === 'followPlayer') {
+                targetInfo = options.targetPlayer;
+            } else if (this.currentBehaviorName === 'mineBlock') {
+                targetInfo = options.blockName || options.blockId;
+            } else if (this.currentBehaviorName === 'combat') {
+                targetInfo = options.targetMobName;
+            }
+
             return {
                 name: this.currentBehaviorName,
                 isActive: true,
+                target: targetInfo,
             };
         }
         return null;
     }
 
-    /**
-     * 特定の行動を開始します。
-     * @param behaviorName 開始する行動の名前
-     * @param options 行動に渡すオプション
-     * @returns 行動が正常に開始されたかどうか
-     */
     public async startBehavior(behaviorName: BehaviorName, options?: any): Promise<boolean> {
-        // 現在の行動を停止
-        this.stopCurrentBehavior();
+        const newBehaviorPriority = BEHAVIOR_PRIORITIES[behaviorName];
+        const currentBehaviorPriority = this.currentBehaviorName ? BEHAVIOR_PRIORITIES[this.currentBehaviorName] : BEHAVIOR_PRIORITIES.idle;
+
+        if (newBehaviorPriority < currentBehaviorPriority) {
+            if (this.currentBehaviorName && this.activeBehaviorInstances[this.currentBehaviorName]?.isRunning()) {
+                console.log(`BehaviorEngine: Interrupting '${this.currentBehaviorName}' (priority ${currentBehaviorPriority}) for '${behaviorName}' (priority ${newBehaviorPriority}).`);
+                this.activeBehaviorInstances[this.currentBehaviorName]?.pause();
+                this.behaviorStack.push(this.currentBehaviorName);
+            }
+        } else if (newBehaviorPriority > currentBehaviorPriority) {
+            console.warn(`BehaviorEngine: Cannot start '${behaviorName}' (priority ${newBehaviorPriority}) because current behavior '${this.currentBehaviorName}' (priority ${currentBehaviorPriority}) has higher/equal priority.`);
+            return false;
+        } else if (this.currentBehaviorName === behaviorName && this.activeBehaviorInstances[behaviorName]?.isRunning()) {
+            console.log(`BehaviorEngine: Behavior '${behaviorName}' is already active. Ignoring start request.`);
+            return true;
+        }
+
+        if (this.currentBehaviorName && this.currentBehaviorName !== behaviorName) {
+             this.stopCurrentBehavior();
+        }
 
         console.log(`Starting behavior: ${behaviorName} with options:`, options);
-        this.currentBehaviorName = behaviorName; // 新しい行動を設定
+        this.currentBehaviorName = behaviorName;
 
         let behaviorStarted = false;
         let behaviorInstance: BehaviorInstance | undefined;
@@ -103,11 +207,22 @@ export class BehaviorEngine {
                 }
                 break;
             case 'mineBlock':
-                if ((options && (options.blockId || options.blockName))) {
+                if ((options && (options.blockId !== undefined || options.blockName !== undefined))) {
                     behaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, options as MineBlockOptions);
                     behaviorStarted = await Promise.resolve(behaviorInstance.start());
                 } else {
                     console.error('MineBlock behavior requires either blockId or blockName option.');
+                }
+                break;
+            case 'combat':
+                if (options && options.targetMobName) {
+                    behaviorInstance = new CombatBehavior(this.bot, this.worldKnowledge, options as CombatOptions);
+                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                    if (behaviorStarted && behaviorInstance) {
+                        this.monitorBehaviorCompletion(behaviorInstance, behaviorName);
+                    }
+                } else {
+                    console.error('Combat behavior requires a targetMobName option (string).');
                 }
                 break;
             case 'idle':
@@ -115,10 +230,6 @@ export class BehaviorEngine {
                 this.bot.clearControlStates();
                 this.worldKnowledge.stopPathfinding();
                 behaviorStarted = true;
-                break;
-            case 'combat':
-                console.warn('Combat behavior not yet fully implemented.');
-                behaviorStarted = false; // 仮
                 break;
             default:
                 console.error(`Unknown behavior: ${behaviorName}`);
@@ -128,15 +239,49 @@ export class BehaviorEngine {
         if (behaviorStarted && behaviorInstance) {
             this.activeBehaviorInstances[behaviorName] = behaviorInstance;
         } else {
-            this.currentBehaviorName = null; // 開始失敗時は現在の行動をリセット
+            this.currentBehaviorName = null;
             return false;
         }
         return behaviorStarted;
     }
 
-    /**
-     * 現在実行中の行動を停止します。
-     */
+    private monitorBehaviorCompletion(behaviorInstance: BehaviorInstance, behaviorName: BehaviorName): void {
+        const checkCompletion = setInterval(() => {
+            if (!behaviorInstance.isRunning()) {
+                clearInterval(checkCompletion);
+                console.log(`BehaviorEngine: '${behaviorName}' behavior completed or stopped.`);
+                if (this.currentBehaviorName === behaviorName) {
+                    this.currentBehaviorName = null;
+                    if (this.combatModeEnabled && behaviorName === 'combat' && !this.behaviorStack.length) {
+                         console.log("BehaviorEngine: Combat mode ON. Re-evaluating for next enemy.");
+                         this.tryInterruptForCombat(false);
+                    } else {
+                        this.resumePreviousBehavior();
+                    }
+                }
+            }
+        }, this.MONITOR_INTERVAL_MS);
+    }
+
+    private resumePreviousBehavior(): void {
+        const previousBehaviorName = this.behaviorStack.pop();
+        if (previousBehaviorName) {
+            const previousInstance = this.activeBehaviorInstances[previousBehaviorName];
+            if (previousInstance) {
+                console.log(`BehaviorEngine: Resuming previous behavior '${previousBehaviorName}'.`);
+                this.currentBehaviorName = previousBehaviorName;
+                previousInstance.resume();
+                this.monitorBehaviorCompletion(previousInstance, previousBehaviorName);
+            } else {
+                console.warn(`BehaviorEngine: Previous behavior instance for '${previousBehaviorName}' not found. Starting idle.`);
+                this.startBehavior('idle');
+            }
+        } else {
+            console.log('BehaviorEngine: Behavior stack is empty. No previous behavior to resume. Starting idle.');
+            this.startBehavior('idle');
+        }
+    }
+
     public stopCurrentBehavior(): void {
         if (!this.currentBehaviorName) {
             console.log('No active behavior to stop.');
@@ -147,10 +292,8 @@ export class BehaviorEngine {
 
         const activeInstance = this.activeBehaviorInstances[this.currentBehaviorName];
         if (activeInstance) {
-            activeInstance.stop(); // 行動インスタンスの停止メソッドを呼び出す
-            delete this.activeBehaviorInstances[this.currentBehaviorName]; // インスタンスを削除
+            activeInstance.stop();
         }
-
         this.currentBehaviorName = null;
         this.bot.clearControlStates();
         this.worldKnowledge.stopPathfinding();
