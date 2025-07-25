@@ -1,38 +1,59 @@
-// src/services/BotManager.ts (修正版)
+// src/services/BotManager.ts (修正版 - 死亡/リスポーンイベント通知)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
 
+/**
+ * ボットの現在の状態を表す型
+ */
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
+/**
+ * Mineflayerボットのライフサイクルを管理するクラス
+ */
 export class BotManager {
     private bot: mineflayer.Bot | null = null;
     private status: BotStatus = 'disconnected';
     private reconnectTimeout: NodeJS.Timeout | null = null;
-    private readonly RECONNECT_DELAY_MS = 5000;
-    private botInstanceEventEmitter: EventEmitter;
+    private readonly RECONNECT_DELAY_MS = 5000; // 5秒後に再接続を試みる
+    private botInstanceEventEmitter: EventEmitter; // 追加: ボットインスタンスのイベントを通知
 
     constructor(
         private username: string,
         private host: string,
         private port: number
     ) {
-        this.botInstanceEventEmitter = new EventEmitter();
+        this.botInstanceEventEmitter = new EventEmitter(); // 初期化
         console.log(`BotManager initialized for ${username}@${host}:${port}`);
     }
 
+    /**
+     * ボットの現在の状態を取得します。
+     * @returns ボットの状態
+     */
     public getStatus(): BotStatus {
         return this.status;
     }
 
+    /**
+     * Mineflayerボットのインスタンスを取得します。
+     * @returns Mineflayer Botインスタンス、またはnull
+     */
     public getBot(): mineflayer.Bot | null {
         return this.bot;
     }
 
+    /**
+     * ボットインスタンスに関するイベントを購読するためのEventEmitterを取得します。
+     * 'spawn' イベントでボットインスタンスを渡します。
+     */
     public getBotInstanceEventEmitter(): EventEmitter {
         return this.botInstanceEventEmitter;
     }
 
+    /**
+     * Minecraftサーバーにボットを接続します。
+     */
     public async connect(): Promise<void> {
         if (this.status === 'connecting' || this.status === 'connected') {
             console.log('Bot is already connecting or connected. Skipping new connection attempt.');
@@ -47,6 +68,7 @@ export class BotManager {
                 host: this.host,
                 port: this.port,
                 username: this.username,
+                // version: '1.18.2' // 特定のバージョンを指定する場合
             });
 
             this.setupBotListeners();
@@ -56,7 +78,7 @@ export class BotManager {
                 this.bot.once('spawn', () => {
                     this.setStatus('connected');
                     console.log(`Bot ${this.username} connected and spawned!`);
-                    this.botInstanceEventEmitter.emit('spawn', this.bot);
+                    this.botInstanceEventEmitter.emit('spawn', this.bot); // 'spawn'イベントを発行
                     resolve();
                 });
                 this.bot.once('error', (err) => {
@@ -76,11 +98,14 @@ export class BotManager {
         } catch (error) {
             console.error(`Failed to create bot instance: ${error}`);
             this.setStatus('error');
-            this.scheduleReconnect();
+            this.scheduleReconnect(); // インスタンス作成失敗時も再接続を試みる
             throw error;
         }
     }
 
+    /**
+     * ボットを切断します。
+     */
     public disconnect(): void {
         if (this.bot && this.status === 'connected') {
             console.log(`Disconnecting bot ${this.username}...`);
@@ -92,6 +117,10 @@ export class BotManager {
         }
     }
 
+    /**
+     * ボットのイベントリスナーを設定します。
+     * これにより、通信遮断やエラーを検出し、自動再接続を試みます。
+     */
     private setupBotListeners(): void {
         if (!this.bot) return;
 
@@ -129,6 +158,20 @@ export class BotManager {
                 this.botInstanceEventEmitter.emit('spawn', this.bot);
             }
         });
+
+        // --- ボットの死亡/リスポーンイベントを追加 ---
+        this.bot.on('death', () => {
+            console.log('Bot died!');
+            this.botInstanceEventEmitter.emit('death'); // 死亡イベントを通知
+            // 死亡後、通常は'respawn'イベントが続きます
+        });
+
+        this.bot.on('respawn', () => {
+            console.log('Bot respawned!');
+            this.botInstanceEventEmitter.emit('respawn'); // リスポーンイベントを通知
+            // リスポーン後の処理はBehaviorEngineやCommandHandlerで行う
+        });
+        // --- End ボットの死亡/リスポーンイベント ---
     }
 
     private cleanupBot(): void {

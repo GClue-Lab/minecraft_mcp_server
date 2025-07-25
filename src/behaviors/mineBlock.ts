@@ -1,35 +1,22 @@
-// src/behaviors/mineBlock.ts (最終修正版 - レジストリの型修正)
+// src/behaviors/mineBlock.ts (最終修正版 - registryアクセスでanyを使用)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
 import { goals } from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
-import { Block } from 'prismarine-block'; // Blockクラスを直接インポート
+import { Block } from 'prismarine-block'; // Blockクラスを直接インポート（これが問題ない前提）
 
-// mineflayerのレジストリ内のブロックエントリの型を明示的に定義
-// Mineflayerのregistry.blocksの各要素は、BlockTypeインターフェースに似た構造を持つが、
-// `@types/mineflayer` が提供する `Block` (クラスではない) インターフェースが id を持つことが多い
-interface MineflayerRegistryBlockInfo {
-    id: number; // 数値ID
-    name: string; // ブロックの内部名 (例: "stone", "oak_log")
-    displayName: string; // 表示名 (例: "Stone", "Oak Log")
-    hardness?: number;
-    diggable?: boolean;
-    variations?: { id: number; metadata: number; name: string; displayName: string }[];
-    // その他、registry.blocksの各エントリが持つ可能性のあるプロパティ
-    metadata?: number; // 特定のブロック（例: 羊毛の色）のサブID
-    transparent?: boolean;
-    // ...
-}
+// mineflayer.Bot.registry.blocks の要素の型は直接定義せず、anyで扱う
+// type MineflayerRegistryBlockInfo = mineflayer.BlockType; // 削除またはコメントアウト
 
 /**
  * ブロック採掘行動のオプションインターフェース
  */
 export interface MineBlockOptions {
-    blockId?: number;     // 採掘するブロックのID（例: 1 for Stone, 17 for Oak Log）
-    blockName?: string;   // 採掘するブロックの名前（例: 'stone', 'oak_log'）
-    quantity?: number;    // 採掘する個数 (デフォルト: 1個)
-    maxDistance?: number; // 検索する最大距離 (デフォルト: 32ブロック)
+    blockId?: number;
+    blockName?: string;
+    quantity?: number;
+    maxDistance?: number;
 }
 
 /**
@@ -109,13 +96,14 @@ export class MineBlockBehavior {
             if (this.options.blockId) {
                 blockIdsToFind.push(this.options.blockId);
             } else if (this.options.blockName) {
-                // mineflayer.BlockType の代わりに定義した MineflayerRegistryBlockInfo を使用
-                const blockByName = Object.values(this.bot.registry.blocks).find(
-                    (b: MineflayerRegistryBlockInfo) => b.name === this.options.blockName // 型を MineflayerRegistryBlockInfo に修正
+                // registry.blocks の値は any 型として扱う
+                // これにより、TypeScriptの型チェックを回避し、ランタイムの動作に任せる
+                const blockByName = (Object.values(this.bot.registry.blocks) as any[]).find(
+                    (b: any) => b.name === this.options.blockName
                 );
+                
                 if (blockByName) {
-                    // variations があればそのID、なければブロック自体のID
-                    blockIdsToFind = blockByName.variations ? blockByName.variations.map(v => v.id) : [blockByName.id]; // blockByName.id に修正
+                    blockIdsToFind = blockByName.variations ? blockByName.variations.map((v: any) => v.id) : [blockByName.id];
                 } else {
                     console.error(`MineBlockBehavior: Block with name "${this.options.blockName}" not found in registry.`);
                     this.stop();

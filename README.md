@@ -23,6 +23,12 @@ curl -X POST -H "Content-Type: application/json" \
 ```
 
 
+石を採掘する
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "mineBlock", "blockId": 1, "quantity": 1, "id": "mine-stone-one" }' \
+     http://192.168.1.45:3000/command
+```
 
 ```
 git clone https://github.com/GClue-Lab/minecraft_mcp_server

@@ -1,13 +1,14 @@
-// src/services/BehaviorEngine.ts (修正版)
+// src/services/BehaviorEngine.ts (修正版 - 死亡/リスポーン時の行動停止)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
 import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
-import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock'; // 追加
+import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
 import { Vec3 } from 'vec3';
+import { BotManager } from './BotManager'; // BotManagerをインポート
 
 // 行動の種類を定義
-export type BehaviorName = 'followPlayer' | 'idle' | 'combat' | 'mineBlock'; // 'mineBlock' を追加
+export type BehaviorName = 'followPlayer' | 'idle' | 'combat' | 'mineBlock';
 
 /**
  * すべての行動クラスが実装すべき共通インターフェース
@@ -35,7 +36,6 @@ export interface CurrentBehavior {
 export class BehaviorEngine {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
-    // BehaviorInstanceを実装するクラスのインスタンスを保持するマップ
     private activeBehaviorInstances: { [key in BehaviorName]?: BehaviorInstance } = {};
     private currentBehaviorName: BehaviorName | null = null; // 現在アクティブな行動の名前
 
@@ -44,6 +44,25 @@ export class BehaviorEngine {
         this.worldKnowledge = worldKnowledge;
         console.log('BehaviorEngine initialized.');
     }
+
+    /**
+     * BotManagerからのイベントを購読するためのメソッド
+     * main.ts からボットインスタンスが生成された後に呼び出されることを想定
+     */
+    public setupBotEvents(botManager: BotManager): void {
+        botManager.getBotInstanceEventEmitter().on('death', () => {
+            console.warn('BehaviorEngine: Bot died! Stopping current behavior.');
+            this.stopCurrentBehavior(); // 死亡時に現在の行動を強制停止
+            // LLMへの通知など、追加の死亡時処理をここに記述
+        });
+
+        botManager.getBotInstanceEventEmitter().on('respawn', () => {
+            console.log('BehaviorEngine: Bot respawned! Setting to idle behavior.');
+            this.startBehavior('idle'); // リスポーン後にアイドル行動を開始
+            // 必要に応じて、以前の行動を再開するかどうかを判断するロジックを記述
+        });
+    }
+
 
     /**
      * 現在実行中の行動の名前と状態を取得します。
@@ -78,12 +97,12 @@ export class BehaviorEngine {
             case 'followPlayer':
                 if (options && typeof options.targetPlayer === 'string') {
                     behaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, options as FollowPlayerOptions);
-                    behaviorStarted = await Promise.resolve(behaviorInstance.start()); // startがPromiseを返す可能性を考慮
+                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
                 } else {
                     console.error('FollowPlayer behavior requires a targetPlayer option (string).');
                 }
                 break;
-            case 'mineBlock': // mineBlock行動を追加
+            case 'mineBlock':
                 if ((options && (options.blockId || options.blockName))) {
                     behaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, options as MineBlockOptions);
                     behaviorStarted = await Promise.resolve(behaviorInstance.start());

@@ -1,11 +1,11 @@
-// src/main.ts (修正版)
+// src/main.ts (修正版 - BehaviorEngineにBotManagerのイベントをセットアップ)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
 import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
 import { McpApi } from './api/mcpApi';
-import * as mineflayer from 'mineflayer'; // Mineflayerの型をimport
+import * as mineflayer from 'mineflayer';
 
 // 環境変数を読み込む
 const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
@@ -29,11 +29,6 @@ async function startMcpServer() {
     try {
         const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
 
-        // APIサーバーはボットの接続状態に関わらずすぐに起動
-        // commandHandlerはbotManagerのみで初期化し、
-        // WorldKnowledge/BehaviorEngineはbotがspawnしてから設定する
-        // ※ ここでの CommandHandler は BotManager のみで機能する部分（例: botStatus）は扱えるが、
-        //    bot.entity や pathfinder を使うコマンドは WorldKnowledge/BehaviorEngine が初期化されるまで機能しない
         commandHandler = new CommandHandler(botManager, null as any, null as any); // 初期はnullで型アサーション、後で設定
         mcpApi = new McpApi(commandHandler, MCP_SERVER_PORT);
         mcpApi.start();
@@ -44,12 +39,13 @@ async function startMcpServer() {
         botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
             console.log('Bot spawned. Initializing WorldKnowledge and BehaviorEngine...');
 
-            // ボットインスタンスが利用可能になったらこれらのサービスを初期化
             worldKnowledge = new WorldKnowledge(bot);
             behaviorEngine = new BehaviorEngine(bot, worldKnowledge);
+            
+            // --- ここでBehaviorEngineにBotManagerのイベントをセットアップ ---
+            behaviorEngine.setupBotEvents(botManager); 
+            // --- End BehaviorEngineのイベントセットアップ ---
 
-            // CommandHandlerにWorldKnowledgeとBehaviorEngineのインスタンスをセット（または再初期化）
-            // コンストラクタを変更する代わりに、setterメソッドをCommandHandlerに追加する方がクリーン
             commandHandler.setWorldKnowledge(worldKnowledge);
             commandHandler.setBehaviorEngine(behaviorEngine);
 

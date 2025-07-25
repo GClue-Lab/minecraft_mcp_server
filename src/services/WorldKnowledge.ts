@@ -1,4 +1,4 @@
-// src/services/WorldKnowledge.ts (最終修正版 - removeAllListeners削除)
+// src/services/WorldKnowledge.ts (最終修正版 - findPathのPromise解決)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
@@ -181,45 +181,51 @@ export class WorldKnowledge {
         }
 
         const goal = new goals.GoalNear(endPos.x, endPos.y, endPos.z, range);
-        this.bot.pathfinder.setGoal(goal);
+        this.bot.pathfinder.setGoal(goal); // ここで経路探索を開始
 
         console.log(`Pathfinding started towards ${endPos.x},${endPos.y},${endPos.z} (range: ${range})`);
 
         return new Promise<Path | null>((resolve) => {
-            const goalReachedHandler = () => {
-                this.bot.pathfinder.removeListener('goal_reached', goalReachedHandler);
-                this.bot.pathfinder.removeListener('goal_cant_be_reached', goalCantBeReachedHandler);
-                this.bot.pathfinder.removeListener('goal_timeout', goalTimeoutHandler);
-                resolve(null);
+            const cleanUpListeners = () => {
+                this.bot.removeListener('goal_reached', onGoalReached);
+                this.bot.removeListener('goal_cant_be_reached', onGoalCantBeReached);
+                this.bot.removeListener('goal_timeout', onGoalTimeout);
             };
-            const goalCantBeReachedHandler = () => {
-                this.bot.pathfinder.removeListener('goal_reached', goalReachedHandler);
-                this.bot.pathfinder.removeListener('goal_cant_be_reached', goalCantBeReachedHandler);
-                this.bot.pathfinder.removeListener('goal_timeout', goalTimeoutHandler);
+
+            const onGoalReached = () => {
+                cleanUpListeners();
+                // 経路探索が成功したら、pathfinderから現在のパスデータを取得して解決
+                // bot.pathfinder.getPath() は引数を取らない場合が多いが、型定義によっては getPathTo(..) の可能性も
+                // mineflayer-pathfinderのPathfinderインターフェースはgetPathToのみを公開しているので、
+                // このPromiseを解決するために適切なPathオブジェクトを生成するか、
+                // 実際には null 以外の値を返す必要がない場合は、このままにするか検討が必要
+                // ここでは、パスが成功したという事実を null ではない値で示し、
+                // Path型を実装したオブジェクトがあればそれを返すとよいでしょう。
+                // 現状Pathオブジェクトの具体的なプロパティを使っていないため、nullではないオブジェクトを返します。
+                resolve({ result: 'success', movements: [] } as Path); // Path型に合わせて具体的なオブジェクトを返す
+            };
+            const onGoalCantBeReached = () => {
+                cleanUpListeners();
                 console.warn(`Path to ${endPos} with range ${range} could not be found.`);
                 resolve(null);
             };
-            const goalTimeoutHandler = () => {
-                this.bot.pathfinder.removeListener('goal_reached', goalReachedHandler);
-                this.bot.pathfinder.removeListener('goal_cant_be_reached', goalCantBeReachedHandler);
-                this.bot.pathfinder.removeListener('goal_timeout', goalTimeoutHandler);
+            const onGoalTimeout = () => {
+                cleanUpListeners();
                 console.warn(`Path to ${endPos} with range ${range} timed out.`);
                 resolve(null);
             };
 
-            this.bot.pathfinder.once('goal_reached', goalReachedHandler);
-            this.bot.pathfinder.once('goal_cant_be_reached', goalCantBeReachedHandler);
-            this.bot.pathfinder.once('goal_timeout', goalTimeoutHandler);
+            this.bot.once('goal_reached', onGoalReached);
+            this.bot.once('goal_cant_be_reached', onGoalCantBeReached);
+            this.bot.once('goal_timeout', onGoalTimeout);
         });
     }
 
     public stopPathfinding(): void {
         if (this.bot.pathfinder) {
             this.bot.pathfinder.stop();
-            // 以下の行を削除: removeAllListenersはPathfinderには存在しない
-            // this.bot.pathfinder.removeAllListeners('goal_reached');
-            // this.bot.pathfinder.removeAllListeners('goal_cant_be_reached');
-            // this.bot.pathfinder.removeAllListeners('goal_timeout');
+            // イベントリスナーは findPath 内で once を使っているため自動的に削除される
+            // または cleanUpListeners() を明示的に呼び出すことで対応
             console.log("Pathfinding stopped.");
         }
     }

@@ -1,33 +1,46 @@
-// src/types/mineflayer-extensions.d.ts (変更なし - 以前の修正で対応済みのはず)
+// src/types/mineflayer-extensions.d.ts (最終最終版 - pathfinderイベントをBotEventsに追加)
 
 import { EventEmitter } from 'events';
+import { Block as PrismarineBlock } from 'prismarine-block';
+import { Entity as PrismarineEntity } from 'prismarine-entity';
+import { IndexedData } from 'minecraft-data'; // minecraft-data がインストールされている前提
 
 declare module 'mineflayer' {
     interface Bot {
         pathfinder: import('mineflayer-pathfinder').Pathfinder & EventEmitter;
+        entity: PrismarineEntity;
+        entities: { [id: number]: PrismarineEntity };
+        registry: IndexedData; // minecraft-data がインストールされている前提
     }
-    // Mineflayer の Entity と Block もここで拡張する
-    // ただし、これらは mineflayer の BotEvents から直接取得するのがより正確
-    // interface Entity { /* 必要であれば追加 */ }
-    // interface Block { /* 必要であれば追加 */ }
+
+    // BotEvents に mineflayer-pathfinder 関連イベントを追加
+    interface BotEvents {
+        entitySpawn: (entity: PrismarineEntity) => void;
+        entityGone: (entity: PrismarineEntity) => void;
+        entityMoved: (entity: PrismarineEntity) => void;
+        blockUpdate: (oldBlock: PrismarineBlock | null, newBlock: PrismarineBlock) => void;
+        playerJoined: (player: mineflayer.Player) => void;
+        playerLeft: (player: mineflayer.Player) => void;
+
+        // --- mineflayer-pathfinder 関連イベントの追加 ---
+        goal_reached: () => void;
+        goal_cant_be_reached: () => void;
+        goal_timeout: () => void;
+        // --- End mineflayer-pathfinder 関連イベント ---
+    }
 }
 
+// mineflayer-pathfinder の型定義は変更なし
 declare module 'mineflayer-pathfinder' {
-    // Pathfinder 自体が EventEmitter を継承していることを明示
     interface Pathfinder extends EventEmitter {
-        // 'getPath' の代わりに 'getPathTo' が存在し、その戻り値は ComputedPath
         getPathTo(
-            movements: import('mineflayer-pathfinder').Movements, // movementsの型も指定
-            goal: import('mineflayer-pathfinder').goals.Goal, // goalの型も指定
+            movements: import('mineflayer-pathfinder').Movements,
+            goal: import('mineflayer-pathfinder').goals.Goal,
             timeout?: number
-        ): Path; // ComputedPath が Pathfinder.Path と同じなら Path を使用
+        ): Path;
     }
-    // Pathfinder の getPathTo メソッドの戻り値の型
     interface Path {
-        // Path の具体的なプロパティ（例: result, movements）があればここに定義
-        // mineflayer-pathfinder のソースコードやドキュメントで確認
-        result: string; // 例えば 'success'
-        movements: Array<any>; // 動きの配列
-        // ... 他のプロパティ
+        result: string;
+        movements: Array<any>;
     }
 }
