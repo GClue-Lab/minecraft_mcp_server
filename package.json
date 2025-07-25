@@ -1,0 +1,28 @@
+{
+  "name": "minecraft_mcp_server",
+  "version": "1.0.0",
+  "description": "minecraft mcp server",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node src/main.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^24.1.0",
+    "express": "^5.1.0",
+    "mineflayer": "^4.25.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "prismarine-block": "^1.21.0",
+    "prismarine-entity": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
