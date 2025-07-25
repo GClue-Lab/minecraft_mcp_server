@@ -2,11 +2,22 @@
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
-import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer'; // 追加
+import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
+import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock'; // 追加
 import { Vec3 } from 'vec3';
 
 // 行動の種類を定義
-export type BehaviorName = 'followPlayer' | 'idle' | 'combat'; // 必要に応じて追加
+export type BehaviorName = 'followPlayer' | 'idle' | 'combat' | 'mineBlock'; // 'mineBlock' を追加
+
+/**
+ * すべての行動クラスが実装すべき共通インターフェース
+ * これにより、BehaviorEngineは型安全に行動を管理できる
+ */
+interface BehaviorInstance {
+    start(): Promise<boolean> | boolean; // startメソッドはPromiseを返す可能性も考慮
+    stop(): void;
+    isRunning(): boolean;
+}
 
 /**
  * 現在実行中の行動の状態
@@ -24,7 +35,8 @@ export interface CurrentBehavior {
 export class BehaviorEngine {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
-    private activeBehavior: { [key in BehaviorName]?: FollowPlayerBehavior /* | OtherBehaviorClasses */ } = {}; // アクティブな行動インスタンスを保持
+    // BehaviorInstanceを実装するクラスのインスタンスを保持するマップ
+    private activeBehaviorInstances: { [key in BehaviorName]?: BehaviorInstance } = {};
     private currentBehaviorName: BehaviorName | null = null; // 現在アクティブな行動の名前
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge) {
@@ -37,12 +49,10 @@ export class BehaviorEngine {
      * 現在実行中の行動の名前と状態を取得します。
      */
     public getCurrentBehavior(): CurrentBehavior | null {
-        if (this.currentBehaviorName && this.activeBehavior[this.currentBehaviorName]?.isRunning()) {
-            // ここで、実行中の行動の具体的なオプションなども含めると、より詳細な状態を返せる
+        if (this.currentBehaviorName && this.activeBehaviorInstances[this.currentBehaviorName]?.isRunning()) {
             return {
                 name: this.currentBehaviorName,
                 isActive: true,
-                // ... (optionsをBehaviorBaseのような共通インターフェースで持つ場合に追加)
             };
         }
         return null;
@@ -54,7 +64,7 @@ export class BehaviorEngine {
      * @param options 行動に渡すオプション
      * @returns 行動が正常に開始されたかどうか
      */
-    public startBehavior(behaviorName: BehaviorName, options?: any): boolean {
+    public async startBehavior(behaviorName: BehaviorName, options?: any): Promise<boolean> {
         // 現在の行動を停止
         this.stopCurrentBehavior();
 
@@ -62,22 +72,26 @@ export class BehaviorEngine {
         this.currentBehaviorName = behaviorName; // 新しい行動を設定
 
         let behaviorStarted = false;
+        let behaviorInstance: BehaviorInstance | undefined;
 
         switch (behaviorName) {
             case 'followPlayer':
-                // FollowPlayerBehaviorのインスタンスを作成し、開始
                 if (options && typeof options.targetPlayer === 'string') {
-                    const followBehavior = new FollowPlayerBehavior(this.bot, this.worldKnowledge, options as FollowPlayerOptions);
-                    behaviorStarted = followBehavior.start();
-                    if (behaviorStarted) {
-                        this.activeBehavior.followPlayer = followBehavior;
-                    }
+                    behaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, options as FollowPlayerOptions);
+                    behaviorStarted = await Promise.resolve(behaviorInstance.start()); // startがPromiseを返す可能性を考慮
                 } else {
                     console.error('FollowPlayer behavior requires a targetPlayer option (string).');
                 }
                 break;
+            case 'mineBlock': // mineBlock行動を追加
+                if ((options && (options.blockId || options.blockName))) {
+                    behaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, options as MineBlockOptions);
+                    behaviorStarted = await Promise.resolve(behaviorInstance.start());
+                } else {
+                    console.error('MineBlock behavior requires either blockId or blockName option.');
+                }
+                break;
             case 'idle':
-                // アイドル行動はシンプルにここで直接制御（または専用のIdleBehaviorクラスを作成）
                 console.log('Bot is now idle.');
                 this.bot.clearControlStates();
                 this.worldKnowledge.stopPathfinding();
@@ -85,7 +99,6 @@ export class BehaviorEngine {
                 break;
             case 'combat':
                 console.warn('Combat behavior not yet fully implemented.');
-                // ここでCombatBehaviorのインスタンスを作成し、開始
                 behaviorStarted = false; // 仮
                 break;
             default:
@@ -93,8 +106,11 @@ export class BehaviorEngine {
                 break;
         }
 
-        if (!behaviorStarted) {
+        if (behaviorStarted && behaviorInstance) {
+            this.activeBehaviorInstances[behaviorName] = behaviorInstance;
+        } else {
             this.currentBehaviorName = null; // 開始失敗時は現在の行動をリセット
+            return false;
         }
         return behaviorStarted;
     }
@@ -110,23 +126,14 @@ export class BehaviorEngine {
 
         console.log(`Stopping current behavior: ${this.currentBehaviorName}`);
 
-        // 各行動のstopメソッドを呼び出す
-        switch (this.currentBehaviorName) {
-            case 'followPlayer':
-                this.activeBehavior.followPlayer?.stop();
-                break;
-            case 'idle':
-                // アイドル行動の停止ロジック（もしあれば）
-                break;
-            case 'combat':
-                // 戦闘行動の停止ロジック
-                break;
+        const activeInstance = this.activeBehaviorInstances[this.currentBehaviorName];
+        if (activeInstance) {
+            activeInstance.stop(); // 行動インスタンスの停止メソッドを呼び出す
+            delete this.activeBehaviorInstances[this.currentBehaviorName]; // インスタンスを削除
         }
 
         this.currentBehaviorName = null;
         this.bot.clearControlStates();
         this.worldKnowledge.stopPathfinding();
     }
-
-    // 他のBehaviorEngineのヘルパーメソッドは必要に応じて追加
 }

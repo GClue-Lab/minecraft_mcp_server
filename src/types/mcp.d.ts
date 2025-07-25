@@ -1,4 +1,4 @@
-// src/types/mcp.d.ts
+// src/types/mcp.d.ts (修正版)
 
 /**
  * MCPサーバーが受け取る基本的なコマンド構造
@@ -31,9 +31,16 @@ export interface GetStatusCommand extends BaseMcpCommand {
     type: 'getStatus';
 }
 
-// 今後追加される他のコマンドもここに定義します
-// export interface MineCommand extends BaseMcpCommand { type: 'mine'; blockType: string; quantity: number; }
-// export interface AttackCommand extends BaseMcpCommand { type: 'attack'; targetId?: string; }
+/**
+ * 'mineBlock' コマンドの型定義 (新規追加)
+ */
+export interface MineBlockCommand extends BaseMcpCommand {
+    type: 'mineBlock';
+    blockId?: number;     // 採掘するブロックのID（例: 1 for Stone, 17 for Oak Log）
+    blockName?: string;   // 採掘するブロックの名前（例: 'stone', 'oak_log'）
+    quantity?: number;    // 採掘する個数 (デフォルト: 1個)
+    maxDistance?: number; // 検索する最大距離 (デフォルト: 32ブロック)
+}
 
 
 /**
@@ -42,9 +49,8 @@ export interface GetStatusCommand extends BaseMcpCommand {
 export type McpCommand =
     | FollowPlayerCommand
     | SendMessageCommand
-    | GetStatusCommand;
-    // | MineCommand
-    // | AttackCommand;
+    | GetStatusCommand
+    | MineBlockCommand; // 新しいコマンドを追加
 
 /**
  * MCPサーバーからの基本的な応答構造

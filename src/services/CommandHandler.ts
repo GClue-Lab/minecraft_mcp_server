@@ -11,11 +11,15 @@ import {
     FollowPlayerCommand,
     SendMessageCommand,
     GetStatusCommand,
-    BaseMcpCommand // 追加
+    MineBlockCommand, // 追加
+    BaseMcpCommand
 } from '../types/mcp';
 import * as mineflayer from 'mineflayer';
-import { Vec3 } from 'vec3'; // Vec3はここからインポート
+import { Vec3 } from 'vec3';
 
+/**
+ * LLMからのMCPコマンドを処理し、Mineflayerボットの動作に変換するクラス
+ */
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
@@ -36,6 +40,11 @@ export class CommandHandler {
         this.behaviorEngine = be;
     }
 
+    /**
+     * MCPコマンドを処理します。
+     * @param command LLMから受け取ったMCPコマンド
+     * @returns 処理結果を示すMcpResponse
+     */
     public async handleCommand(command: McpCommand): Promise<McpResponse> {
         console.log(`Handling command: ${command.type} (ID: ${command.id || 'N/A'})`);
 
@@ -62,9 +71,9 @@ export class CommandHandler {
                     return await this.handleSendMessage(bot, command as SendMessageCommand);
                 case 'getStatus':
                     return this.handleGetStatus(bot, command as GetStatusCommand);
+                case 'mineBlock': // 新しいコマンドの処理を追加
+                    return await this.handleMineBlock(bot, command as MineBlockCommand);
                 default:
-                    // 'command' が McpCommand のどの型にもマッチしなかった場合、型が 'never' になるため、
-                    // BaseMcpCommand に型アサーションして id と type にアクセスできるようにする
                     const unknownCommand = command as BaseMcpCommand;
                     return this.createErrorResponse(unknownCommand.id, `Unknown command type: ${unknownCommand.type}`);
             }
@@ -74,6 +83,10 @@ export class CommandHandler {
         }
     }
 
+    /**
+     * 'followPlayer' コマンドを処理します。
+     * BehaviorEngineに処理を委譲します。
+     */
     private async handleFollowPlayer(bot: mineflayer.Bot, command: FollowPlayerCommand): Promise<McpResponse> {
         const { targetPlayer } = command;
 
@@ -86,7 +99,7 @@ export class CommandHandler {
             return this.createErrorResponse(command.id, `Player "${targetPlayer}" not found in current world knowledge.`);
         }
 
-        const started = this.behaviorEngine.startBehavior('followPlayer', { targetPlayer: targetPlayer });
+        const started = await this.behaviorEngine.startBehavior('followPlayer', { targetPlayer: targetPlayer });
 
         if (started) {
             return this.createSuccessResponse(command.id, `Attempting to follow player: ${targetPlayer}`);
@@ -95,6 +108,9 @@ export class CommandHandler {
         }
     }
 
+    /**
+     * 'sendMessage' コマンドを処理します。
+     */
     private async handleSendMessage(bot: mineflayer.Bot, command: SendMessageCommand): Promise<McpResponse> {
         const { message } = command;
         if (!message || message.trim() === '') {
@@ -107,6 +123,35 @@ export class CommandHandler {
         return this.createSuccessResponse(command.id, `Message sent: "${message}"`);
     }
 
+    /**
+     * 'mineBlock' コマンドを処理します (新規追加)。
+     * BehaviorEngineに処理を委譲します。
+     */
+    private async handleMineBlock(bot: mineflayer.Bot, command: MineBlockCommand): Promise<McpResponse> {
+        const { blockId, blockName, quantity, maxDistance } = command;
+
+        if (!this.worldKnowledge || !this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `Internal error: WorldKnowledge or BehaviorEngine not available.`);
+        }
+
+        if (!blockId && !blockName) {
+            return this.createErrorResponse(command.id, 'MineBlock command requires either blockId or blockName.');
+        }
+
+        const started = await this.behaviorEngine.startBehavior('mineBlock', { blockId, blockName, quantity, maxDistance });
+
+        if (started) {
+            const targetInfo = blockName ? blockName : (blockId ? `ID:${blockId}` : 'unknown block');
+            return this.createSuccessResponse(command.id, `Attempting to mine ${quantity || 1} of ${targetInfo}.`);
+        } else {
+            return this.createErrorResponse(command.id, `Failed to start mineBlock behavior.`);
+        }
+    }
+
+
+    /**
+     * 'getStatus' コマンドを処理します。
+     */
     private handleGetStatus(bot: mineflayer.Bot, command: GetStatusCommand): McpResponse {
         if (!this.worldKnowledge || !this.behaviorEngine) {
             return this.createErrorResponse(command.id, `Internal error: WorldKnowledge or BehaviorEngine not available for status.`);
@@ -117,7 +162,7 @@ export class CommandHandler {
             botStatus: BotStatus;
             botHealth: number | null;
             botFood: number | null;
-            botPosition: Vec3 | null; // mineflayer.Vec3 から Vec3 に変更
+            botPosition: Vec3 | null;
             currentBehavior: BehaviorName | null;
             nearbyPlayers: WorldEntity[];
             nearbyHostileMobs: WorldEntity[];
@@ -134,6 +179,9 @@ export class CommandHandler {
         return this.createSuccessResponse(command.id, 'Current bot status.', status);
     }
 
+    /**
+     * 成功応答オブジェクトを生成します。
+     */
     private createSuccessResponse(commandId: string | undefined, message: string, data?: any): SuccessMcpResponse {
         return {
             status: 'success',
@@ -143,6 +191,9 @@ export class CommandHandler {
         };
     }
 
+    /**
+     * エラー応答オブジェクトを生成します。
+     */
     private createErrorResponse(commandId: string | undefined, message: string, details?: any): ErrorMcpResponse {
         return {
             status: 'error',
