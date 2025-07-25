@@ -1,14 +1,11 @@
-// src/services/WorldKnowledge.ts (最終修正版)
+// src/services/WorldKnowledge.ts (最終修正版 - removeAllListeners削除)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
 import { pathfinder as pathfinderPlugin, goals, Pathfinder, Path } from 'mineflayer-pathfinder';
 
-// MineflayerのBotEventsからEntityとBlockの型を抽出します
 type Entity = Parameters<mineflayer.BotEvents['entitySpawn']>[0];
-type Block = Parameters<mineflayer.BotEvents['blockUpdate']>[1]; 
-// blockUpdateイベントのoldBlockの型はParameters<mineflayer.BotEvents['blockUpdate']>[0] で取得できます
-// または、単純に Block | null を指定します
+type Block = Parameters<mineflayer.BotEvents['blockUpdate']>[1];
 
 export interface WorldEntity {
     id: number;
@@ -40,7 +37,6 @@ export class WorldKnowledge {
         
         this.bot.on('playerJoined', (player: mineflayer.Player) => this.handlePlayerJoined(player));
         this.bot.on('playerLeft', (player: mineflayer.Player) => this.handlePlayerLeft(player));
-        // ここを修正: oldBlock の型を Block | null に変更します
         this.bot.on('blockUpdate', (oldBlock: Block | null, newBlock: Block) => this.handleBlockUpdate(oldBlock, newBlock));
         this.bot.on('kicked', (reason: string) => this.clearKnowledge(reason));
         this.bot.on('end', (reason: string) => this.clearKnowledge(reason));
@@ -132,10 +128,8 @@ export class WorldKnowledge {
         }
     }
 
-    // ここを修正: oldBlock の型を Block | null に変更します
     private handleBlockUpdate(oldBlock: Block | null, newBlock: Block): void {
         // console.log(`Block updated at ${newBlock.position}: ${oldBlock?.displayName} -> ${newBlock.displayName}`);
-        // oldBlock が null の可能性があるため、アクセスする際は `?.` (オプショナルチェイニング) を使用することを推奨します。
     }
 
     private clearKnowledge(reason: string): void {
@@ -222,9 +216,10 @@ export class WorldKnowledge {
     public stopPathfinding(): void {
         if (this.bot.pathfinder) {
             this.bot.pathfinder.stop();
-            this.bot.pathfinder.removeAllListeners('goal_reached');
-            this.bot.pathfinder.removeAllListeners('goal_cant_be_reached');
-            this.bot.pathfinder.removeAllListeners('goal_timeout');
+            // 以下の行を削除: removeAllListenersはPathfinderには存在しない
+            // this.bot.pathfinder.removeAllListeners('goal_reached');
+            // this.bot.pathfinder.removeAllListeners('goal_cant_be_reached');
+            // this.bot.pathfinder.removeAllListeners('goal_timeout');
             console.log("Pathfinding stopped.");
         }
     }

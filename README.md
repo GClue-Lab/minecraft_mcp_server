@@ -1,6 +1,29 @@
 # minecraft_mcp_server
 minecraft mcp server
 
+周辺状況の確認
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "getStatus", "id": "test-status-123" }' \
+     http://192.168.1.25:3000/command
+```
+
+
+プレイヤーを追従する
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "followPlayer", "targetPlayer": "YourMinecraftPlayer", "id": "test-follow-behavior" }' \
+     http://localhost:3000/command
+```
+
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "followPlayer", "targetPlayer": "naisy714", "id": "test-follow-behavior" }' \
+     http://192.168.1.25:3000/command
+```
+
+
+
 ```
 git clone https://github.com/GClue-Lab/minecraft_mcp_server
 cd minecraft_mcp_server
