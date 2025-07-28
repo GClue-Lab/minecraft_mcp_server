@@ -1,33 +1,30 @@
-// src/services/WorldKnowledge.ts v1.20 (Pathfinder依存削除)
+// src/services/WorldKnowledge.ts v1.28
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
-// pathfinder, goals, Pathfinder, Path, Movements は mineflayer-pathfinder から来るので削除
-// import { pathfinder as pathfinderPlugin, goals, Pathfinder, Path, Movements } from 'mineflayer-pathfinder';
-
-type Entity = Parameters<mineflayer.BotEvents['entitySpawn']>[0];
-type Block = Parameters<mineflayer.BotEvents['blockUpdate']>[1];
+// ここを修正: Entity と Block をそれぞれのパッケージからインポートします
+import { Entity } from 'prismarine-entity'; 
+import { Block } from 'prismarine-block';
 
 export interface WorldEntity {
     id: number;
-    type: 'player' | 'mob' | 'object' | 'other';
+    type: 'player' | 'mob' | 'object' | 'projectile' | 'vehicle' | 'hanging' | 'orb' | 'xp_orb' | 'egg' | 'item' | 'falling_block' | 'painting' | 'armor_stand' | 'leash_knot' | 'fishing_bobber' | 'lightning' | 'area_effect_cloud' | 'ender_crystal' | 'wither_skull' | 'fireball' | 'shulker_bullet' | 'boat' | 'minecart' | 'tnt' | 'ender_pearl' | 'eye_of_ender' | 'firework_rocket' | 'experience_orb' | 'item_frame' | 'end_crystal' | 'evoker_fangs' | 'spectral_arrow' | 'dragon_fireball' | 'trident' | 'arrow' | 'llama_spit' | 'fishing_hook' | 'block_display' | 'item_display' | 'text_display' | 'interaction' | 'carrot_on_a_stick' | 'warped_fungus_on_a_stick' | 'hostile' | 'passive' | 'ambient' | 'other';
     name?: string;
     username?: string;
     position: Vec3;
     health?: number;
     food?: number;
     isAlive?: boolean;
+    isValid: boolean;
 }
 
 export class WorldKnowledge {
     private bot: mineflayer.Bot;
     private entities: Map<number, WorldEntity> = new Map();
     private players: Map<string, WorldEntity> = new Map();
-    // private isPathfindingActive: boolean = false; // <<<< 削除
 
     constructor(bot: mineflayer.Bot) {
         this.bot = bot;
-        // this.bot.loadPlugin(pathfinderPlugin); // <<<< 削除
         this.setupEventListeners();
         console.log('WorldKnowledge initialized. Monitoring world events...');
     }
@@ -38,24 +35,21 @@ export class WorldKnowledge {
             this.bot.removeAllListeners();
         }
         this.bot = newBot;
-        // this.bot.loadPlugin(pathfinderPlugin); // <<<< 削除
         this.setupEventListeners();
         this.clearKnowledge('Bot instance updated');
         console.log('WorldKnowledge: Bot instance updated and listeners re-setup.');
     }
 
-    // isPathfindingInProgress メソッドは Pathfinder 依存なので削除
-    // public isPathfindingInProgress(): boolean {
-    //     return this.isPathfindingActive;
-    // }
+    public isPathfindingInProgress(): boolean {
+        return false;
+    }
 
     private setupEventListeners(): void {
         if (this.bot) {
             this.bot.removeAllListeners();
         }
         
-        // "WorldKnowledge: Pathfinder movements will use default configuration." // <<<< 削除
-        console.log("WorldKnowledge: Initializing core event listeners."); // ログメッセージを修正
+        console.log("WorldKnowledge: Initializing core event listeners.");
 
         this.bot.on('entitySpawn', (entity: Entity) => this.handleEntitySpawn(entity));
         this.bot.on('entityGone', (entity: Entity) => this.handleEntityGone(entity));
@@ -66,11 +60,6 @@ export class WorldKnowledge {
         this.bot.on('blockUpdate', (oldBlock: Block | null, newBlock: Block) => this.handleBlockUpdate(oldBlock, newBlock));
         this.bot.on('kicked', (reason: string) => this.clearKnowledge(reason));
         this.bot.on('end', (reason: string) => this.clearKnowledge(reason));
-
-        // goal_reached, goal_cant_be_reached, goal_timeout イベントリスナーは Pathfinder 依存なので削除
-        // bot.once('goal_reached', onGoalReached);
-        // bot.once('goal_cant_be_reached', onGoalCantBeReached);
-        // bot.once('goal_timeout', onGoalTimeout);
 
         this.bot.once('spawn', () => { 
             console.log('Bot spawned. Populating initial world knowledge.');
@@ -90,6 +79,8 @@ export class WorldKnowledge {
             type: entity.type as any,
             position: entity.position,
             health: (entity as any).health,
+            isAlive: (entity as any).isAlive, 
+            isValid: entity.isValid,
         };
         if (entity.type === 'player' && entity.username) {
             worldEntity.username = entity.username;
@@ -98,6 +89,7 @@ export class WorldKnowledge {
         } else if (entity.name) {
             worldEntity.name = entity.name;
         }
+        console.log(`[WorldKnowledge] Entity Spawned: ID:${entity.id}, Type:${worldEntity.type}, Name:${entity.name || 'N/A'}, Pos:(${entity.position.x.toFixed(2)},${entity.position.y.toFixed(2)},${entity.position.z.toFixed(2)}), Valid:${entity.isValid}`);
         this.entities.set(entity.id, worldEntity);
     }
 
@@ -109,6 +101,7 @@ export class WorldKnowledge {
                 this.players.delete(removedEntity.username);
             }
             this.entities.delete(entity.id);
+            console.log(`[WorldKnowledge] Entity Gone: ID:${entity.id}, Type:${removedEntity?.type}, Name:${removedEntity?.name || 'N/A'}, Valid:${removedEntity?.isValid}`);
         }
     }
 
@@ -118,6 +111,7 @@ export class WorldKnowledge {
         if (knownEntity) {
             knownEntity.position = entity.position;
             if ((entity as any).health !== undefined) knownEntity.health = (entity as any).health;
+            knownEntity.isValid = entity.isValid;
         } else {
             this.handleEntitySpawn(entity);
         }
@@ -133,11 +127,12 @@ export class WorldKnowledge {
             position: player.entity.position,
             health: player.entity.health,
             food: player.entity.food,
-            isAlive: player.entity.isValid,
+            isAlive: player.entity.isValid, 
+            isValid: player.entity.isValid,
         };
         this.players.set(player.username, worldEntity);
         this.entities.set(player.entity.id, worldEntity);
-        console.log(`Player joined: ${player.username}`);
+        console.log(`[WorldKnowledge] Player Joined: ${player.username}, Valid:${player.entity.isValid}`);
     }
 
     private handlePlayerLeft(player: mineflayer.Player): void {
@@ -148,7 +143,7 @@ export class WorldKnowledge {
                 this.entities.delete(removedPlayer.id);
             }
             this.players.delete(player.username);
-            console.log(`Player left: ${player.username}`);
+            console.log(`[WorldKnowledge] Player Left: ${player.username}`);
         }
     }
 
@@ -163,7 +158,8 @@ export class WorldKnowledge {
     }
 
     public getAllEntities(): WorldEntity[] {
-        return Array.from(this.entities.values());
+        const allEntities = Array.from(this.entities.values());
+        return allEntities;
     }
 
     public getEntityById(id: number): WorldEntity | undefined {
@@ -185,6 +181,7 @@ export class WorldKnowledge {
                 health: this.bot.health,
                 food: this.bot.food,
                 isAlive: this.bot.entity.isValid,
+                isValid: this.bot.entity.isValid,
             };
         }
         return undefined;
@@ -197,14 +194,4 @@ export class WorldKnowledge {
         });
         return block;
     }
-
-    // findPath メソッドは mineflayer-pathfinder 依存なので削除
-    // public async findPath(startPos: Vec3, endPos: Vec3, range: number = 1): Promise<Path | null> {
-    //    ...
-    // }
-
-    // stopPathfinding メソッドは mineflayer-pathfinder 依存なので削除
-    // public stopPathfinding(): void {
-    //    ...
-    // }
 }

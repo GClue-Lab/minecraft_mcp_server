@@ -1,7 +1,7 @@
-// src/services/CommandHandler.ts v1.4
+// src/services/CommandHandler.ts v1.8
 
 import * as mineflayer from 'mineflayer';
-// import { Vec3 } from 'vec3'; // <<<< 削除 (Vec3はもはや不要なため)
+import { Vec3 } from 'vec3'; // Vec3 は WorldKnowledge で依然として使用されているため残す
 
 import {
     McpCommand,
@@ -16,13 +16,17 @@ import {
     StopCommand,
     ConnectCommand,
     SetCombatModeCommand,
+    SetFollowModeCommand, // <<<< 追加: SetFollowModeCommandをインポート
+    SetBehaviorPriorityCommand, // <<<< 追加: SetBehaviorPriorityCommandをインポート
     TeleportCommand,
-    BaseMcpCommand
+    BaseMcpCommand,
+    BehaviorName,
+    CurrentBehavior
 } from '../types/mcp';
 
 import { BotManager, BotStatus } from './BotManager';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
-import { BehaviorEngine, BehaviorName, CurrentBehavior } from './BehaviorEngine';
+import { BehaviorEngine } from './BehaviorEngine'; // BehaviorNameとCurrentBehaviorのインポートはmcp.d.tsからなので、ここから削除
 
 import { FollowPlayerOptions } from '../behaviors/followPlayer';
 import { MineBlockOptions } from '../behaviors/mineBlock';
@@ -63,6 +67,14 @@ export class CommandHandler {
 
         if (command.type === 'setCombatMode') {
             return this.handleSetCombatMode(command as SetCombatModeCommand);
+        }
+
+        if (command.type === 'setFollowMode') { // <<<< 追加
+            return this.handleSetFollowMode(command as SetFollowModeCommand);
+        }
+
+        if (command.type === 'setBehaviorPriority') { // <<<< 追加
+            return this.handleSetBehaviorPriority(command as SetBehaviorPriorityCommand);
         }
 
         if (command.type === 'teleport') {
@@ -129,8 +141,9 @@ export class CommandHandler {
             botFood: bot?.food !== undefined ? bot.food : null,
             botPosition: botPosition,
             currentBehavior: currentBehavior,
+            // nearbyPlayers/HostileMobs は WorldKnowledge が有効な場合のみフィルター
             nearbyPlayers: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => e.type === 'player' && e.id !== bot?.entity.id && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
-            nearbyHostileMobs: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
+            nearbyHostileMobs: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob' || e.type === 'hostile') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
         };
         console.log('[STATUS] Bot status requested.');
         return this.createSuccessResponse(command.id, 'Current bot status.', status);
@@ -142,15 +155,12 @@ export class CommandHandler {
             targetPlayer: command.targetPlayer,
             distanceThreshold: command.distanceThreshold !== undefined ? command.distanceThreshold : undefined,
             recheckInterval: command.recheckInterval !== undefined ? command.recheckInterval : undefined,
-            // maxPathfindingAttempts はもはや不要なので削除
-            // maxFallbackPathfindingRange はもはや不要なので削除
         };
-        const started = await this.behaviorEngine.startBehavior('followPlayer', options);
-        if (started) {
-            return this.createSuccessResponse(command.id, `Attempting to follow player: ${command.targetPlayer}.`);
-        } else {
-            return this.createErrorResponse(command.id, `Failed to start following player: ${command.targetPlayer}.`);
-        }
+        // startBehavior は followPlayer モードのON/OFFで制御されるため、
+        // ここで直接 startBehavior を呼ぶと、モード設定と競合する可能性があります。
+        // コマンドはモード設定として扱うため、ここではモードを設定するのみとします。
+        this.behaviorEngine.setFollowMode(true, command.targetPlayer);
+        return this.createSuccessResponse(command.id, `Follow Mode set to ON for player: ${command.targetPlayer}. Bot will start following if priority allows.`);
     }
 
     private async handleSendMessage(bot: mineflayer.Bot, command: SendMessageCommand): Promise<McpResponse> {
@@ -190,7 +200,7 @@ export class CommandHandler {
             maxCombatDistance: command.maxCombatDistance !== undefined ? command.maxCombatDistance : undefined,
             attackRange: command.attackRange !== undefined ? command.attackRange : undefined,
             stopAfterKill: command.stopAfterKill !== undefined ? command.stopAfterKill : undefined,
-            // maxAttempts はもはや不要なので削除
+            recheckTargetInterval: command.recheckTargetInterval !== undefined ? command.recheckTargetInterval : undefined, // ここを修正
         };
         const started = await this.behaviorEngine.startBehavior('combat', options);
         if (started) {
@@ -207,6 +217,23 @@ export class CommandHandler {
         this.behaviorEngine.setCombatMode(command.mode === 'on');
         return this.createSuccessResponse(command.id, `Combat Mode set to ${command.mode.toUpperCase()}.`);
     }
+
+    private handleSetFollowMode(command: SetFollowModeCommand): McpResponse {
+        if (!this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `BehaviorEngine not initialized. Cannot set follow mode.`);
+        }
+        this.behaviorEngine.setFollowMode(command.mode === 'on', command.targetPlayer || null);
+        return this.createSuccessResponse(command.id, `Follow Mode set to ${command.mode.toUpperCase()} for player: ${command.targetPlayer || 'N/A'}.`);
+    }
+
+    private handleSetBehaviorPriority(command: SetBehaviorPriorityCommand): McpResponse {
+        if (!this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `BehaviorEngine not initialized. Cannot set behavior priority.`);
+        }
+        this.behaviorEngine.setBehaviorPriority(command.behavior, command.priority);
+        return this.createSuccessResponse(command.id, `Priority for ${command.behavior} set to ${command.priority}.`);
+    }
+
 
     private handleStop(command: StopCommand): McpResponse {
         if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");

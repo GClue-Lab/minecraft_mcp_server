@@ -1,12 +1,10 @@
-// src/behaviors/combat.ts v1.3 (基本移動ロジックとクールダウン修正)
+// src/behaviors/combat.ts v1.8
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
-// goals と Path は mineflayer-pathfinder から来るので削除
-// import { goals } from 'mineflayer-pathfinder';
-// import { Path } from 'mineflayer-pathfinder';
-import { Vec3 } from 'vec3'; // Vec3 は引き続き必要
-import { BehaviorName } from '../services/BehaviorEngine';
+import { Vec3 } from 'vec3';
+// ここを修正: BehaviorName のインポート元を '../types/mcp' に変更
+import { BehaviorName } from '../types/mcp'; 
 
 /**
  * 戦闘行動のオプションインターフェース
@@ -16,7 +14,8 @@ export interface CombatOptions {
     maxCombatDistance?: number;
     attackRange?: number;
     stopAfterKill?: boolean;
-    // maxAttempts?: number; // <<<< 削除済み
+    maxAttempts?: number;
+    recheckTargetInterval?: number;
 }
 
 /**
@@ -29,7 +28,8 @@ export class CombatBehavior {
     private isActive: boolean = false;
     private isPaused: boolean = false;
     private currentTargetEntityId: number | null = null;
-    // private currentAttempts: number = 0; // <<<< 削除済み
+    private currentAttempts: number = 0;
+    private lastTargetRecheckTime: number = 0;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: CombatOptions) {
         this.bot = bot;
@@ -40,13 +40,15 @@ export class CombatBehavior {
             maxCombatDistance: options.maxCombatDistance ?? 64,
             attackRange: options.attackRange ?? 3,
             stopAfterKill: options.stopAfterKill ?? true,
-            // maxAttempts: options.maxAttempts ?? 0, // <<<< 削除済み
+            maxAttempts: options.maxAttempts ?? 10,
+            recheckTargetInterval: options.recheckTargetInterval ?? 1000,
         };
 
-        console.log(`CombatBehavior initialized for target: ${this.options.targetMobName} (Max Distance: ${this.options.maxCombatDistance})`);
+        console.log(`CombatBehavior initialized for target: ${this.options.targetMobName} (Max Distance: ${this.options.maxCombatDistance}, Max Attempts: ${this.options.maxAttempts === 0 ? 'Infinite' : this.options.maxAttempts}, Recheck Interval: ${this.options.recheckTargetInterval})`);
     }
 
     public async start(): Promise<boolean> {
+        console.log(`[CombatBehavior.start] Attempting to start. isActive: ${this.isActive}`);
         if (this.isActive) {
             console.warn('CombatBehavior is already active.');
             return false;
@@ -55,13 +57,15 @@ export class CombatBehavior {
         this.isActive = true;
         this.isPaused = false;
         this.currentTargetEntityId = null;
-        // this.currentAttempts = 0; // <<<< 削除済み
+        this.currentAttempts = 0;
+        this.lastTargetRecheckTime = Date.now();
         console.log(`Starting CombatBehavior for ${this.options.targetMobName}...`);
 
-        return this.executeCombatLogic(); // 初回実行と継続ロジック
+        return this.executeCombatLogic();
     }
 
     public stop(): void {
+        console.log(`[CombatBehavior.stop] Stopping behavior. isActive: ${this.isActive}`);
         if (!this.isActive) {
             console.warn('CombatBehavior is not active. Cannot stop.');
             return;
@@ -70,9 +74,10 @@ export class CombatBehavior {
         console.log(`Stopping CombatBehavior.`);
         this.isActive = false;
         this.isPaused = false;
-        this.bot.clearControlStates(); // ボットの制御状態をリセット
-        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
+        this.bot.clearControlStates();
         this.currentTargetEntityId = null;
+        this.currentAttempts = 0;
+        this.lastTargetRecheckTime = 0;
     }
 
     public isRunning(): boolean {
@@ -80,22 +85,23 @@ export class CombatBehavior {
     }
 
     public pause(): void {
+        console.log(`[CombatBehavior.pause] Pausing behavior. isActive: ${this.isActive}, isPaused: ${this.isPaused}`);
         if (!this.isActive || this.isPaused) return;
         console.log(`CombatBehavior: Pausing.`);
         this.isPaused = true;
-        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.bot.clearControlStates();
     }
 
     public resume(): void {
+        console.log(`[CombatBehavior.resume] Resuming behavior. isActive: ${this.isActive}, isPaused: ${this.isPaused}`);
         if (!this.isActive || !this.isPaused) return;
         console.log(`CombatBehavior: Resuming.`);
         this.isPaused = false;
-        this.executeCombatLogic(); // 停止した地点から再開を試みる
+        this.executeCombatLogic();
     }
 
     public canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean {
-        return false; // 戦闘行動は基本的に最高優先度なので、他の行動では中断されない
+        return false;
     }
 
     public getOptions(): CombatOptions {
@@ -106,84 +112,119 @@ export class CombatBehavior {
      * 戦闘のメインロジック。
      */
     private async executeCombatLogic(): Promise<boolean> {
+        console.log(`[CombatBehavior.executeCombatLogic] Entering loop. Active: ${this.isActive}, Paused: ${this.isPaused}. Attempts: ${this.currentAttempts}`);
         while (this.isActive && !this.isPaused) {
-            console.log(`CombatBehavior: Looking for target mob: ${this.options.targetMobName} within ${this.options.maxCombatDistance} blocks.`);
-
-            // 最寄りのターゲットモブを見つける
-            const targetMob = this.worldKnowledge.getAllEntities().find(entity =>
-                entity.type === 'mob' &&
-                entity.name === this.options.targetMobName &&
-                (entity as any).isAlive && // MineflayerのEntityはisValidプロパティを持つが、isAliveは保証されないのでanyで
-                this.bot.entity.position.distanceTo(entity.position) <= this.options.maxCombatDistance
-            );
-
-            if (!targetMob) {
-                console.log(`CombatBehavior: No target mob (${this.options.targetMobName}) found within ${this.options.maxCombatDistance} blocks. Waiting...`);
-                // this.currentAttempts++; // <<<< 削除済み
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                continue;
+            // 試行回数の上限チェック (敵が見つからない場合)
+            if (this.options.maxAttempts > 0 && this.currentAttempts >= this.options.maxAttempts) {
+                console.log(`[CombatBehavior.executeCombatLogic] Max attempts (${this.options.maxAttempts}) reached. No target found. Stopping.`);
+                this.stop();
+                return false;
             }
 
-            this.currentTargetEntityId = targetMob.id;
-            console.log(`CombatBehavior: Found target ${targetMob.name} at ${targetMob.position} (ID: ${targetMob.id})`);
-            // this.currentAttempts = 0; // <<<< 削除済み
+            // ターゲットの再評価が必要か判断
+            const now = Date.now();
+            const shouldRecheckTarget = (now - this.lastTargetRecheckTime) > this.options.recheckTargetInterval;
+            let targetMob = this.currentTargetEntityId ? this.worldKnowledge.getEntityById(this.currentTargetEntityId) : null;
+            
+            if (!targetMob || !targetMob.isValid || shouldRecheckTarget) {
+                console.log(`[CombatBehavior.executeCombatLogic] Rechecking for nearest target mob: ${this.options.targetMobName} within ${this.options.maxCombatDistance} blocks. (Attempt ${this.currentAttempts + 1}/${this.options.maxAttempts === 0 ? 'Infinite' : this.options.maxAttempts})`);
+                this.lastTargetRecheckTime = now; // 再評価時間を更新
+
+                targetMob = this.worldKnowledge.getAllEntities().find(e => {
+                    const isValidEntity = e.isValid;
+                    if (!isValidEntity) return false;
+
+                    if (e.type === 'player' && (e.name === this.bot.username || e.name === 'naisy714')) return false;
+
+                    const hostileMobNames = ['zombie', 'skeleton', 'spider', 'creeper', 'enderman', 'husk', 'stray', 'cave_spider', 'zombified_piglin', 'drowned', 'witch', 'guardian', 'elder_guardian', 'shulker', 'blaze', 'ghast', 'magma_cube', 'slime', 'phantom', 'wither_skeleton', 'piglin', 'piglin_brute', 'zoglin', 'vex', 'vindicator', 'evoker', 'ravager', 'illusions_illager', 'pillager'];
+                    const isMobType = e.type === 'mob' || e.type === 'hostile'; 
+                    const isNamedHostile = e.name && hostileMobNames.includes(e.name);
+                    const isHostile = isMobType && isNamedHostile;
+
+                    if (!isHostile) return false;
+
+                    const distance = this.bot.entity.position.distanceTo(e.position);
+                    const isInRange = distance <= this.options.maxCombatDistance;
+                    
+                    console.log(`[CombatBehavior.executeCombatLogic] Potential mob check: ${e.name} (ID: ${e.id}) at (${e.position.x.toFixed(2)},${e.position.y.toFixed(2)},${e.position.z.toFixed(2)}) (Dist: ${distance.toFixed(2)}, Valid: ${isValidEntity}, InRange: ${isInRange}).`);
+
+                    return isHostile && isInRange;
+                });
+
+                if (targetMob) {
+                    this.currentTargetEntityId = targetMob.id;
+                    this.currentAttempts = 0;
+                    console.log(`[CombatBehavior.executeCombatLogic] Confirmed new target ${targetMob.name} at ${targetMob.position} (ID: ${targetMob.id}).`);
+                } else {
+                    this.currentTargetEntityId = null;
+                    console.log(`[CombatBehavior.executeCombatLogic] No active target mob (${this.options.targetMobName}) found. Incrementing attempts. Waiting...`);
+                    this.currentAttempts++;
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    continue;
+                }
+            }
+
+            if (!this.currentTargetEntityId) {
+                console.warn('[CombatBehavior.executeCombatLogic] No currentTargetEntityId, but loop continued. Re-evaluating.');
+                continue; 
+            }
+            targetMob = this.worldKnowledge.getEntityById(this.currentTargetEntityId!);
+
+            if (!targetMob || !targetMob.isValid || this.bot.entity.position.distanceTo(targetMob.position) > this.options.maxCombatDistance) {
+                console.log(`[CombatBehavior.executeCombatLogic] Current target ${targetMob?.name || 'N/A'} (ID: ${this.currentTargetEntityId}) moved out of range or disappeared/invalidated. Re-evaluating.`);
+                this.currentTargetEntityId = null;
+                this.currentAttempts++;
+                continue;
+            }
 
             const botPosition = this.bot.entity.position;
-            const targetPos = targetMob.position.offset(0, (targetMob as any).height || 1.6, 0); // ターゲットのY座標を調整
+            const targetPos = targetMob.position.offset(0, (targetMob as any).height || 1.6, 0);
 
-            const distance = botPosition.distanceTo(targetPos); // ターゲットY座標調整後の距離
+            const distance = botPosition.distanceTo(targetPos);
 
             if (distance > this.options.attackRange) {
-                console.log(`CombatBehavior: Moving towards ${targetMob.name} at ${targetPos}. Distance: ${distance.toFixed(2)}.`);
-                this.bot.lookAt(targetPos, true); // ターゲットの方向を向く
-                this.bot.setControlState('forward', true); // 前に進む
-                // 簡易的なジャンプロジック (段差を越えるため)
-                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5); 
-                await new Promise(resolve => setTimeout(resolve, 200)); // 少しだけ移動する時間を与える
+                console.log(`[CombatBehavior.executeCombatLogic] Moving towards target. Current distance: ${distance.toFixed(2)}.`);
+                this.bot.lookAt(targetPos, true);
+                this.bot.setControlState('forward', true);
+                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5);
+                await new Promise(resolve => setTimeout(resolve, 200));
                 continue;
             } else {
-                this.bot.clearControlStates(); // 攻撃範囲内なら移動を停止
-                this.bot.lookAt(targetPos, true); // 攻撃前に方向を向く
-            }
-
-            const currentTarget = this.bot.entities[this.currentTargetEntityId!];
-            if (!currentTarget || !(currentTarget as any).isValid || currentTarget.position.distanceTo(this.bot.entity.position) > this.options.attackRange) {
-                console.log(`CombatBehavior: Target ${targetMob.name} moved out of range or disappeared. Re-evaluating.`);
-                this.currentTargetEntityId = null;
-                // this.currentAttempts++; // <<<< 削除済み
-                continue;
+                console.log(`[CombatBehavior.executeCombatLogic] Target within attack range. Distance: ${distance.toFixed(2)}.`);
+                this.bot.clearControlStates();
+                this.bot.lookAt(targetPos, true);
             }
 
             // 攻撃
             try {
-                console.log(`CombatBehavior: Attacking ${currentTarget.name} (ID: ${currentTarget.id})...`);
-                this.bot.attack(currentTarget);
-                // ここを修正: this.bot.attackDelay の代わりに固定のクールダウン時間
-                await new Promise(resolve => setTimeout(resolve, 500)); // 攻撃クールダウンを考慮 (例: 500ms)
+                console.log(`[CombatBehavior.executeCombatLogic] Attacking ${targetMob.name} (ID: ${targetMob.id})...`);
+                this.bot.attack(this.bot.entities[this.currentTargetEntityId!]);
+                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (err: any) {
-                console.error(`CombatBehavior: Failed to attack mob ${currentTarget.name}: ${err.message}`);
+                console.error(`[CombatBehavior.executeCombatLogic] Failed to attack mob ${targetMob.name}: ${err.message}`);
                 this.currentTargetEntityId = null;
-                // this.currentAttempts++; // <<<< 削除済み
+                this.currentAttempts++;
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
 
             // ターゲットが倒されたか確認
-            const finalTargetCheck = this.bot.entities[this.currentTargetEntityId!];
-            if (!finalTargetCheck || !(finalTargetCheck as any).isValid) {
-                console.log(`CombatBehavior: Target ${targetMob.name} defeated or disappeared.`);
+            const finalTargetCheck = this.worldKnowledge.getEntityById(this.currentTargetEntityId!);
+            if (!finalTargetCheck || !finalTargetCheck.isValid) {
+                console.log(`[CombatBehavior.executeCombatLogic] Target ${targetMob.name} defeated or disappeared.`);
                 if (this.options.stopAfterKill) {
                     this.stop();
-                    return true; // 1体倒したら終了
+                    return true;
                 } else {
-                    this.currentTargetEntityId = null; // 次のターゲットを探す
-                    // this.currentAttempts = 0; // <<<< 削除済み
+                    this.currentTargetEntityId = null;
+                    this.currentAttempts = 0;
                     await new Promise(resolve => setTimeout(resolve, 500));
+                    continue;
                 }
             }
         }
 
-        console.log(`CombatBehavior: Combat stopped.`);
+        console.log(`[CombatBehavior.executeCombatLogic] Combat loop exited. IsActive: ${this.isActive}, IsPaused: ${this.isPaused}.`);
         this.stop();
         return true;
     }

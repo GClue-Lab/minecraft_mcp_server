@@ -1,17 +1,20 @@
-// src/services/BehaviorEngine.ts v1.5
+// src/services/BehaviorEngine.ts v1.22
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
 import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
 import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
 import { CombatBehavior, CombatOptions } from '../behaviors/combat';
-import { Vec3 } from 'vec3'; // Vec3 をインポートし直す
+import { Vec3 } from 'vec3';
 import { BotManager } from './BotManager';
+// ここを修正: BehaviorName は mcp.d.ts からインポートする (この行は正しい)
+import { CurrentBehavior, BehaviorName } from '../types/mcp'; 
 
-// 行動の種類と優先順位を定義
-export type BehaviorName = 'combat' | 'followPlayer' | 'mineBlock' | 'idle';
+// ここを修正: BehaviorName のローカル宣言を**完全に削除**します
+// export type BehaviorName = 'combat' | 'followPlayer' | 'mineBlock' | 'idle'; // <<< この行を**完全に削除**します
 
-const BEHAVIOR_PRIORITIES: { [key in BehaviorName]: number } = {
+// 優先度は動的に変更可能にするため、let で宣言 (このファイル内に残す)
+let BEHAVIOR_PRIORITIES: { [key in BehaviorName]: number } = {
     'combat': 0,        // 最優先
     'followPlayer': 10,
     'mineBlock': 20,
@@ -28,12 +31,6 @@ interface BehaviorInstance {
     getOptions(): any;
 }
 
-export interface CurrentBehavior {
-    name: BehaviorName;
-    target?: string | number | Vec3 | null;
-    isActive: boolean;
-}
-
 export class BehaviorEngine {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
@@ -45,6 +42,8 @@ export class BehaviorEngine {
     private interruptMonitorInterval: NodeJS.Timeout | null = null;
     private readonly MONITOR_INTERVAL_MS = 500;
     private combatModeEnabled: boolean = false;
+    private followModeEnabled: boolean = false; // 新規追加: 追従モードの状態
+    private followTargetPlayer: string | null = null; // 新規追加: 追従ターゲットプレイヤー名
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager) {
         this.bot = bot;
@@ -52,7 +51,7 @@ export class BehaviorEngine {
         this.botManager = botManager;
         console.log('BehaviorEngine initialized.');
         this.setupBotEvents(botManager);
-        this.startInterruptMonitor(); // ここで呼び出し
+        this.startInterruptMonitor();
     }
 
     public setBotInstance(newBot: mineflayer.Bot): void {
@@ -74,33 +73,46 @@ export class BehaviorEngine {
 
         this.bot.on('health', () => {
             const botHealth = this.bot.health;
-            if (botHealth && botHealth < 20) {
+            if (botHealth && botHealth < 20) { // ヘルスが減った場合に割り込みを検討
+                console.log(`BehaviorEngine: Bot health is ${botHealth}. Forcing combat check.`);
                 this.tryInterruptForCombat(true);
             }
         });
         
         this.interruptMonitorInterval = setInterval(() => {
             if (this.combatModeEnabled) {
+                console.log('BehaviorEngine: Combat mode ON. Performing regular enemy check.');
                 this.tryInterruptForCombat(false);
+            }
+            if (this.followModeEnabled && this.followTargetPlayer && this.currentBehaviorName !== 'followPlayer' && this.currentBehaviorName !== 'combat') {
+                console.log('BehaviorEngine: Follow mode ON. Performing regular follow check.');
+                this.tryStartFollowBehavior();
             }
         }, this.MONITOR_INTERVAL_MS);
     }
 
-    private startInterruptMonitor(): void { // <<<< このメソッドの定義を追加
+    private startInterruptMonitor(): void {
         if (this.interruptMonitorInterval) {
             clearInterval(this.interruptMonitorInterval);
         }
+        console.log(`BehaviorEngine: Starting interrupt monitor (interval: ${this.MONITOR_INTERVAL_MS}ms).`);
         this.interruptMonitorInterval = setInterval(() => {
             if (this.combatModeEnabled) {
+                console.log('BehaviorEngine: Combat mode ON. Performing regular enemy check.');
                 this.tryInterruptForCombat(false);
+            }
+            if (this.followModeEnabled && this.followTargetPlayer && this.currentBehaviorName !== 'followPlayer' && this.currentBehaviorName !== 'combat') {
+                console.log('BehaviorEngine: Follow mode ON. Performing regular follow check.');
+                this.tryStartFollowBehavior();
             }
         }, this.MONITOR_INTERVAL_MS);
     }
 
-    public setCombatMode(enabled: boolean): void { // <<<< このメソッドの定義を追加
+    public setCombatMode(enabled: boolean): void {
         this.combatModeEnabled = enabled;
         console.log(`BehaviorEngine: Combat Mode set to ${enabled ? 'ON' : 'OFF'}.`);
         if (enabled && this.currentBehaviorName !== 'combat') {
+            console.log('BehaviorEngine: Combat mode activated. Initial enemy check.');
             this.tryInterruptForCombat(false);
         } else if (!enabled && this.currentBehaviorName === 'combat') {
             console.log('BehaviorEngine: Combat Mode OFF. Stopping current combat behavior.');
@@ -109,35 +121,127 @@ export class BehaviorEngine {
         }
     }
 
+    public setFollowMode(enabled: boolean, targetPlayer: string | null = null): void {
+        this.followModeEnabled = enabled;
+        this.followTargetPlayer = targetPlayer;
+        console.log(`BehaviorEngine: Follow Mode set to ${enabled ? 'ON' : 'OFF'}. Target: ${targetPlayer || 'N/A'}`);
+        
+        if (enabled && targetPlayer) {
+            console.log('BehaviorEngine: Follow mode activated. Attempting initial follow.');
+            this.tryStartFollowBehavior();
+        } else if (!enabled && this.currentBehaviorName === 'followPlayer') {
+            console.log(`BehaviorEngine: Follow Mode OFF. Stopping current follow behavior.`);
+            this.stopCurrentBehavior();
+            this.resumePreviousBehavior();
+        } else if (!enabled) {
+            this.followTargetPlayer = null;
+        }
+    }
+
+    public setBehaviorPriority(behaviorName: BehaviorName, priority: number): void {
+        if (BEHAVIOR_PRIORITIES[behaviorName] !== undefined) {
+            BEHAVIOR_PRIORITIES[behaviorName] = priority;
+            console.log(`BehaviorEngine: Priority for ${behaviorName} set to ${priority}.`);
+        } else {
+            console.warn(`BehaviorEngine: Cannot set priority for unknown behavior: ${behaviorName}.`);
+        }
+    }
+
+    private tryStartFollowBehavior(): void {
+        if (!this.followModeEnabled || !this.followTargetPlayer) {
+            console.log('BehaviorEngine: Follow mode not enabled or no target player.');
+            return;
+        }
+
+        const followPriority = BEHAVIOR_PRIORITIES.followPlayer;
+        const currentPriority = this.currentBehaviorName ? BEHAVIOR_PRIORITIES[this.currentBehaviorName] : BEHAVIOR_PRIORITIES.idle;
+
+        if (currentPriority > followPriority && this.currentBehaviorName !== 'combat') {
+             console.log(`BehaviorEngine: Attempting to start follow behavior. Current: ${this.currentBehaviorName}, New: followPlayer.`);
+             this.startBehavior('followPlayer', { targetPlayer: this.followTargetPlayer });
+        } else if (this.currentBehaviorName === 'followPlayer' && this.activeBehaviorInstances.followPlayer?.isRunning()) {
+            console.log(`BehaviorEngine: Already following ${this.followTargetPlayer}. No new action needed.`);
+        } else {
+            console.log(`BehaviorEngine: Cannot start follow behavior. Current behavior '${this.currentBehaviorName}' (Prio: ${currentPriority}) has higher/equal priority or is combat.`);
+        }
+    }
+
     private tryInterruptForCombat(forceInterrupt: boolean): void {
         const botEntity = this.worldKnowledge.getBotEntity();
-        if (!botEntity) return;
+        if (!botEntity) {
+            console.warn('BehaviorEngine: tryInterruptForCombat - Bot entity not available.');
+            return;
+        }
 
-        const nearbyHostileMob = this.worldKnowledge.getAllEntities().find(e =>
-            e.type === 'mob' &&
-            e.isAlive &&
-            (e.name === 'zombie' || e.name === 'skeleton' || e.name === 'spider' || e.name === 'creeper' || e.name === 'enderman') &&
-            botEntity.position.distanceTo(e.position) <= (this.combatModeEnabled ? 16 : 32)
-        );
+        console.log(`BehaviorEngine: tryInterruptForCombat called (force: ${forceInterrupt}). Checking for hostile mobs.`);
+        
+        const hostileMobNames = ['zombie', 'skeleton', 'spider', 'creeper', 'enderman', 'husk', 'stray', 'cave_spider', 'zombified_piglin', 'drowned', 'witch', 'guardian', 'elder_guardian', 'shulker', 'blaze', 'ghast', 'magma_cube', 'slime', 'phantom', 'wither_skeleton', 'piglin', 'piglin_brute', 'zoglin', 'vex', 'vindicator', 'evoker', 'ravager', 'illusions_illager', 'pillager'];
+        
+        const nearbyHostileMob = this.worldKnowledge.getAllEntities().find(e => {
+            const isValidEntity = e.isValid; 
+            if (!isValidEntity) {
+                 console.log(`BehaviorEngine: Skipping invalid entity ID:${e.id}, Name:${e.name || 'N/A'}. Reason: Not valid.`);
+                 return false;
+            }
+            // プレイヤー自身は敵対モブとしない
+            if (e.type === 'player' && e.name === this.bot.username) {
+                return false;
+            }
+            // naisy714 プレイヤーも敵対モブとしない
+            if (e.type === 'player' && e.name === 'naisy714') {
+                return false;
+            }
+
+            const isMobType = e.type === 'mob' || e.type === 'hostile'; // 'hostile'も追加
+            const isNamedHostile = e.name && hostileMobNames.includes(e.name);
+
+            const isHostile = isMobType && isNamedHostile;
+
+            if (!isHostile) {
+                console.log(`BehaviorEngine: Skipping non-hostile mob or unknown type: ID:${e.id}, Type:${e.type}, Name:${e.name || 'N/A'}.`);
+                return false;
+            }
+
+            const distance = botEntity.position.distanceTo(e.position);
+            const detectionRange = forceInterrupt ? 64 : 64; // 強制/通常ともに64ブロックに拡大 (スケルトン対応)
+            const isInRange = distance <= detectionRange;
+            
+            console.log(`BehaviorEngine: Found potential mob: ${e.name} (ID: ${e.id}) at (${e.position.x.toFixed(2)},${e.position.y.toFixed(2)},${e.position.z.toFixed(2)}) (Dist: ${distance.toFixed(2)}, Valid: ${isValidEntity}, InRange: ${isInRange}).`);
+
+            return isHostile && isInRange;
+        });
+
 
         if (nearbyHostileMob) {
+            console.log(`BehaviorEngine: Hostile mob ${nearbyHostileMob.name} detected.`);
             const combatPriority = BEHAVIOR_PRIORITIES.combat;
             const currentPriority = this.currentBehaviorName ? BEHAVIOR_PRIORITIES[this.currentBehaviorName] : BEHAVIOR_PRIORITIES.idle;
 
-            if (currentPriority > combatPriority || (forceInterrupt && this.currentBehaviorName !== 'combat')) {
-                 this.startBehavior('combat', { 
+            if (this.currentBehaviorName === 'combat' && this.activeBehaviorInstances.combat?.isRunning()) {
+                const combatInstance = this.activeBehaviorInstances.combat as CombatBehavior;
+                if (combatInstance.getOptions().targetMobName === nearbyHostileMob.name && combatInstance.isRunning()) {
+                    console.log(`BehaviorEngine: Already in combat with ${nearbyHostileMob.name}. No new action needed.`);
+                    return;
+                }
+                console.log(`BehaviorEngine: Already in combat, but target changed or previous combat ended. Restarting combat for ${nearbyHostileMob.name}.`);
+                this.startBehavior('combat', { 
                     targetMobName: nearbyHostileMob.name,
                     stopAfterKill: true
                 });
-            } else if (this.currentBehaviorName === 'combat' && this.activeBehaviorInstances.combat?.isRunning()) {
-                const combatInstance = this.activeBehaviorInstances.combat as CombatBehavior;
-                if (!combatInstance.isRunning() || combatInstance.getOptions().targetMobName !== nearbyHostileMob.name) {
-                    this.startBehavior('combat', { 
-                        targetMobName: nearbyHostileMob.name,
-                        stopAfterKill: true
-                    });
-                }
+                return;
             }
+
+            if (currentPriority > combatPriority || (forceInterrupt && this.currentBehaviorName !== 'combat')) {
+                 console.log(`BehaviorEngine: Initiating combat for ${nearbyHostileMob.name}. Current: ${this.currentBehaviorName} (Prio: ${currentPriority}), New: combat (Prio: ${combatPriority}).`);
+                this.startBehavior('combat', { 
+                    targetMobName: nearbyHostileMob.name,
+                    stopAfterKill: true
+                });
+            } else {
+                 console.log(`BehaviorEngine: Hostile mob ${nearbyHostileMob.name} detected, but current behavior '${this.currentBehaviorName}' (Prio: ${currentPriority}) has higher/equal priority.`);
+            }
+        } else {
+            console.log('BehaviorEngine: No hostile mobs detected within range.');
         }
     }
 
@@ -149,7 +253,7 @@ export class BehaviorEngine {
                 return null; 
             }
 
-            let targetInfo: string | number | Vec3 | null | undefined;
+            let targetInfo: string | number | { x: number, y: number, z: number } | null | undefined;
 
             const options = instance.getOptions();
             if (this.currentBehaviorName === 'followPlayer') {
@@ -179,8 +283,8 @@ export class BehaviorEngine {
                 this.activeBehaviorInstances[this.currentBehaviorName]?.pause();
                 this.behaviorStack.push(this.currentBehaviorName);
             }
-        } else if (newBehaviorPriority > currentBehaviorPriority) {
-            console.warn(`BehaviorEngine: Cannot start '${behaviorName}' (priority ${newBehaviorPriority}) because current behavior '${this.currentBehaviorName}' (priority ${currentBehaviorPriority}) has higher/equal priority.`);
+        } else if (newBehaviorPriority > currentBehaviorPriority) { // <<<< currentPriority を currentBehaviorPriority に修正
+            console.warn(`BehaviorEngine: Cannot start '${behaviorName}' (priority ${newBehaviorPriority}) because current behavior '${this.currentBehaviorName}' (priority ${currentBehaviorPriority}) has higher/equal priority.`); // <<<< ログも修正
             return false;
         } else if (this.currentBehaviorName === behaviorName && this.activeBehaviorInstances[behaviorName]?.isRunning()) {
             console.log(`BehaviorEngine: Behavior '${behaviorName}' is already active. Ignoring start request.`);
@@ -234,7 +338,6 @@ export class BehaviorEngine {
             case 'idle':
                 console.log('Bot is now idle.');
                 this.bot.clearControlStates();
-                // this.worldKnowledge.stopPathfinding(); // <<<< 削除
                 behaviorStarted = true;
                 break;
             default:
@@ -302,6 +405,5 @@ export class BehaviorEngine {
         }
         this.currentBehaviorName = null;
         this.bot.clearControlStates();
-        // this.worldKnowledge.stopPathfinding(); // <<<< 削除
     }
 }

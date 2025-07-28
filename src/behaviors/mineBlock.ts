@@ -1,13 +1,11 @@
-// src/behaviors/mineBlock.ts v1.4 (基本移動ロジック)
+// src/behaviors/mineBlock.ts v1.8
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
-// goals と Path は mineflayer-pathfinder から来るので削除
-// import { goals } from 'mineflayer-pathfinder';
-// import { Path } from 'mineflayer-pathfinder';
-import { Vec3 } from 'vec3'; // Vec3 は引き続き必要
+import { Vec3 } from 'vec3';
 import { Block } from 'prismarine-block';
-import { BehaviorName } from '../services/BehaviorEngine';
+// ここを修正: BehaviorName のインポート元を '../types/mcp' に変更します
+import { BehaviorName } from '../types/mcp'; 
 
 type MineflayerRegistryBlockInfo = any; 
 
@@ -19,7 +17,6 @@ export interface MineBlockOptions {
     blockName?: string | null;
     quantity?: number;
     maxDistance?: number;
-    // maxPathfindingAttempts?: number; // <<<< 削除済み
 }
 
 /**
@@ -79,8 +76,7 @@ export class MineBlockBehavior {
         console.log(`Stopping MineBlockBehavior.`);
         this.isActive = false;
         this.isPaused = false;
-        this.bot.clearControlStates(); // ボットの制御状態をリセット
-        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
+        this.bot.clearControlStates();
         this.currentTargetBlock = null;
     }
 
@@ -92,7 +88,6 @@ export class MineBlockBehavior {
         if (!this.isActive || this.isPaused) return;
         console.log(`MineBlockBehavior: Pausing.`);
         this.isPaused = true;
-        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.bot.clearControlStates();
     }
 
@@ -156,20 +151,17 @@ export class MineBlockBehavior {
 
             const distanceToBlock = botPosition.distanceTo(targetPos);
 
-            // --- ここを修正: Pathfinderを使わない基本移動ロジック ---
             if (distanceToBlock > 1.5) { // 採掘できる距離まで近づく
                 console.log(`MineBlockBehavior: Moving towards block ${targetBlock.displayName} at ${targetPos}. Distance: ${distanceToBlock.toFixed(2)}.`);
                 this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true); // ブロックの中心を向く
                 this.bot.setControlState('forward', true); // 前に進む
-                // 必要であれば簡易的なジャンプロジックを追加
-                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5);
+                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5); // プレイヤーより高ければジャンプを試みる簡易ロジック
                 await new Promise(resolve => setTimeout(resolve, 200)); // 少しだけ移動する時間を与える
                 continue; // 移動後、次のループで再度距離を確認
             } else {
                 this.bot.clearControlStates(); // 採掘範囲内なら移動を停止
                 this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true); // 採掘前にブロックの中心を向く
             }
-            // --- 修正終わり ---
             
             if (!this.bot.canDigBlock(targetBlock)) {
                 console.warn(`MineBlockBehavior: Cannot dig block ${targetBlock.displayName} at ${targetBlock.position}. Skipping.`);

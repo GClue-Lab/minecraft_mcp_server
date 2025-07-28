@@ -1,4 +1,4 @@
-// src/services/BotManager.ts v1.2
+// src/services/BotManager.ts v1.3
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
@@ -133,9 +133,6 @@ export class BotManager {
 
         this.bot.on('kicked', (reason) => {
             console.error(`Bot kicked from server! Reason: ${reason}`);
-            // 'kicked'は'end'も発火するので、重複した再接続スケジューリングを防ぐため、
-            // 'end'イベントのハンドラに任せるか、ここで明示的に再接続を防ぐ
-            // 今回は'end'ハンドラに任せる
         });
 
         this.bot.on('error', (err) => {
@@ -168,12 +165,7 @@ export class BotManager {
         });
         // --- End ボットの死亡/リスポーンイベント ---
 
-        // --- ここを修正: mineflayer-pathfinder 関連イベントリスナーを削除 ---
-        // Pathfinderを使用しないため、これらのイベントは発火しない
-        // this.bot.once('goal_reached', onGoalReached);
-        // this.bot.once('goal_cant_be_reached', onGoalCantBeReached);
-        // this.bot.once('goal_timeout', onGoalTimeout);
-        // --- 修正終わり ---
+        // mineflayer-pathfinder 関連イベントリスナーは削除済み
     }
 
     private cleanupBot(): void {

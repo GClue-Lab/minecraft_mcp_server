@@ -33,7 +33,7 @@ curl -X POST -H "Content-Type: application/json" \
      http://192.168.1.45:3000/command
 ```
 
-ゾンビ警戒モード
+ゾンビ警戒モードをONにする
 * プレイヤーを追従中に警戒モードがONでゾンビが現れたら、自動的にゾンビ退治が割り込み、倒し終えたら追従に戻ります。
 ```
 curl -X POST -H "Content-Type: application/json" \
@@ -41,6 +41,12 @@ curl -X POST -H "Content-Type: application/json" \
      http://192.168.1.25:3000/command
 ```
 
+ゾンビ警戒モードをOFFにする
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{ "type": "setCombatMode", "mode": "off", "id": "disable-combat-mode" }' \
+     http://192.168.1.25:3000/command
+```
 
 ```
 git clone https://github.com/GClue-Lab/minecraft_mcp_server
