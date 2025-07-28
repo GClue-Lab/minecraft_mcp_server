@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts v1.8
+// src/services/CommandHandler.ts v1.10
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3'; // Vec3 は WorldKnowledge で依然として使用されているため残す
@@ -11,13 +11,14 @@ import {
     FollowPlayerCommand,
     SendMessageCommand,
     GetStatusCommand,
-    MineBlockCommand,
     AttackMobCommand,
     StopCommand,
     ConnectCommand,
     SetCombatModeCommand,
-    SetFollowModeCommand, // <<<< 追加: SetFollowModeCommandをインポート
-    SetBehaviorPriorityCommand, // <<<< 追加: SetBehaviorPriorityCommandをインポート
+    SetCombatOptionsCommand,
+    SetMiningModeCommand,
+    SetFollowModeCommand,
+    SetBehaviorPriorityCommand,
     TeleportCommand,
     BaseMcpCommand,
     BehaviorName,
@@ -69,11 +70,19 @@ export class CommandHandler {
             return this.handleSetCombatMode(command as SetCombatModeCommand);
         }
 
-        if (command.type === 'setFollowMode') { // <<<< 追加
+        if (command.type === 'setCombatOptions') {
+            return this.handleSetCombatOptions(command as SetCombatOptionsCommand);
+        }
+
+        if (command.type === 'setMiningMode') {
+            return this.handleSetMiningMode(command as SetMiningModeCommand);
+        }
+
+        if (command.type === 'setFollowMode') {
             return this.handleSetFollowMode(command as SetFollowModeCommand);
         }
 
-        if (command.type === 'setBehaviorPriority') { // <<<< 追加
+        if (command.type === 'setBehaviorPriority') {
             return this.handleSetBehaviorPriority(command as SetBehaviorPriorityCommand);
         }
 
@@ -106,8 +115,6 @@ export class CommandHandler {
                     return this.handleGetStatus(bot, command as GetStatusCommand);
                 case 'followPlayer':
                     return await this.handleFollowPlayer(command as FollowPlayerCommand);
-                case 'mineBlock':
-                    return await this.handleMineBlock(command as MineBlockCommand);
                 case 'attackMob':
                     return await this.handleAttackMob(command as AttackMobCommand);
                 case 'stop':
@@ -175,24 +182,6 @@ export class CommandHandler {
         return this.createSuccessResponse(command.id, `Message sent: "${message}"`);
     }
 
-    private async handleMineBlock(command: MineBlockCommand): Promise<McpResponse> {
-        if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
-        const options: MineBlockOptions = {
-            blockId: command.blockId !== undefined ? command.blockId : undefined,
-            blockName: command.blockName !== undefined ? command.blockName : undefined,
-            quantity: command.quantity !== undefined ? command.quantity : undefined,
-            maxDistance: command.maxDistance !== undefined ? command.maxDistance : undefined,
-        };
-        const started = await this.behaviorEngine.startBehavior('mineBlock', options);
-        if (started) {
-            const targetInfo = options.blockName ? options.blockName : (options.blockId ? `ID:${options.blockId}` : 'unknown block');
-            return this.createSuccessResponse(command.id, `Attempting to mine ${options.quantity || 1} of ${targetInfo}.`);
-        } else {
-            const targetInfo = options.blockName ? options.blockName : (options.blockId ? `ID:${options.blockId}` : 'unknown block');
-            return this.createErrorResponse(command.id, `Failed to start mining ${targetInfo}.`);
-        }
-    }
-
     private async handleAttackMob(command: AttackMobCommand): Promise<McpResponse> {
         if (!this.behaviorEngine) throw new Error("BehaviorEngine not initialized.");
         const options: CombatOptions = {
@@ -218,6 +207,64 @@ export class CommandHandler {
         return this.createSuccessResponse(command.id, `Combat Mode set to ${command.mode.toUpperCase()}.`);
     }
 
+
+    /**
+     * setCombatOptionsコマンドを処理する (新規追加)
+     */
+    private handleSetCombatOptions(command: SetCombatOptionsCommand): McpResponse {
+        if (!this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `BehaviorEngine not initialized. Cannot set combat options.`);
+        }
+
+        const options: CombatOptions = {
+            maxCombatDistance: command.maxCombatDistance,
+            attackRange: command.attackRange,
+        };
+
+        // undefinedのプロパティをフィルタリングして、既存の設定を上書きしないようにする
+        const cleanOptions = Object.fromEntries(
+            Object.entries(options).filter(([_, v]) => v !== undefined)
+        );
+
+        if (Object.keys(cleanOptions).length === 0) {
+            return this.createErrorResponse(command.id, `No valid options provided.`);
+        }
+        
+        this.behaviorEngine.setCombatOptions(cleanOptions);
+        return this.createSuccessResponse(command.id, `Default combat options updated.`, cleanOptions);
+    }
+
+    /**
+     * setMiningModeコマンドを処理する (新規追加)
+     */
+    private handleSetMiningMode(command: SetMiningModeCommand): McpResponse {
+        if (!this.behaviorEngine) {
+            return this.createErrorResponse(command.id, `BehaviorEngine not initialized.`);
+        }
+
+        if (command.mode === 'on') {
+            const options: MineBlockOptions = {
+                blockName: command.blockName,
+                blockId: command.blockId,
+                quantity: command.quantity,
+                maxDistance: command.maxDistance
+            };
+
+            const followTarget = this.behaviorEngine.getFollowTargetPlayer();
+            let onCompleteAction;
+            if (followTarget) {
+                onCompleteAction = {
+                    behavior: 'followPlayer' as BehaviorName,
+                    options: { targetPlayer: followTarget }
+                };
+            }
+            this.behaviorEngine.setMiningMode(true, options, onCompleteAction);
+        } else {
+            this.behaviorEngine.setMiningMode(false);
+        }
+        
+        return this.createSuccessResponse(command.id, `Mining Mode set to ${command.mode.toUpperCase()}.`);
+    }
     private handleSetFollowMode(command: SetFollowModeCommand): McpResponse {
         if (!this.behaviorEngine) {
             return this.createErrorResponse(command.id, `BehaviorEngine not initialized. Cannot set follow mode.`);

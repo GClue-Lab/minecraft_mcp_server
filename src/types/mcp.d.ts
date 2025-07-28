@@ -1,4 +1,4 @@
-// src/types/mcp.d.ts v1.8
+// src/types/mcp.d.ts v1.10
 
 // Vec3 は mcp.d.ts で直接定義せず、使用する場所でインポートするか、
 // 必要であれば { x: number, y: number, z: number } のように具体的な構造で記述します。
@@ -43,16 +43,6 @@ export interface GetStatusCommand extends BaseMcpCommand { // <<< export
     type: 'getStatus';
 }
 
-/**
- * 'mineBlock' コマンドの型定義
- */
-export interface MineBlockCommand extends BaseMcpCommand { // <<< export
-    type: 'mineBlock';
-    blockId?: number | null;
-    blockName?: string | null;
-    quantity?: number;
-    maxDistance?: number;
-}
 
 /**
  * 'attackMob' コマンドの型定義
@@ -87,6 +77,27 @@ export interface ConnectCommand extends BaseMcpCommand { // <<< export
 export interface SetCombatModeCommand extends BaseMcpCommand { // <<< export
     type: 'setCombatMode';
     mode: 'on' | 'off';
+}
+
+/**
+ * 'setCombatOptions' コマンドの型定義 (新規追加)
+ */
+export interface SetCombatOptionsCommand extends BaseMcpCommand {
+    type: 'setCombatOptions';
+    maxCombatDistance?: number;
+    attackRange?: number;
+}
+
+/**
+ * 'setMiningMode' コマンドの型定義
+ */
+export interface SetMiningModeCommand extends BaseMcpCommand {
+    type: 'setMiningMode';
+    mode: 'on' | 'off';
+    blockName?: string | null;
+    blockId?: number | null;
+    quantity?: number;
+    maxDistance?: number;
 }
 
 /**
@@ -125,11 +136,12 @@ export type McpCommand = // <<< export
     | FollowPlayerCommand
     | SendMessageCommand
     | GetStatusCommand
-    | MineBlockCommand
     | AttackMobCommand
     | StopCommand
     | ConnectCommand
     | SetCombatModeCommand
+    | SetCombatOptionsCommand
+    | SetMiningModeCommand
     | SetFollowModeCommand
     | SetBehaviorPriorityCommand
     | TeleportCommand;

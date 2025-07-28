@@ -21,32 +21,71 @@ curl -X POST -H "Content-Type: application/json" \
 プレイヤーを追従する
 ```
 curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "followPlayer", "targetPlayer": "naisy714", "id": "test-follow-behavior" }' \
+     -d '{"type": "setFollowMode", "mode": "on", "targetPlayer": "naisy714"}' \
      http://192.168.1.25:3000/command
 ```
 
-
-石を採掘する
+プレイヤーの追従を解除する
 ```
 curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "mineBlock", "blockId": 1, "quantity": 1, "id": "mine-stone-one" }' \
-     http://192.168.1.45:3000/command
+     -d '{"type": "setFollowMode", "mode": "off"}' \
+     http://192.168.1.25:3000/command
 ```
+
 
 ゾンビ警戒モードをONにする
 * プレイヤーを追従中に警戒モードがONでゾンビが現れたら、自動的にゾンビ退治が割り込み、倒し終えたら追従に戻ります。
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "setCombatMode", "mode": "on", "id": "enable-combat-mode" }' \
-     http://192.168.1.25:3000/command
+curl -X POST -H "Content-Type: application/json" -d '{"type": "setCombatMode", "mode": "on"}' http://192.168.1.25:3000/command
 ```
 
 ゾンビ警戒モードをOFFにする
 ```
+curl -X POST -H "Content-Type: application/json" -d '{"type": "setCombatMode", "mode": "off"}' http://192.168.1.25:3000/command
+```
+
+石を10個採掘する
+```
 curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "setCombatMode", "mode": "off", "id": "disable-combat-mode" }' \
+     -d '{"type": "setMiningMode", "mode": "on", "blockName": "stone", "quantity": 10}' \
      http://192.168.1.25:3000/command
 ```
+
+木を採取する
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"type": "setMiningMode", "mode": "on", "blockName": "oak_log", "quantity": 5}' \
+     http://192.168.1.25:3000/command
+```
+
+赤いキノコを採取する
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"type": "setMiningMode", "mode": "on", "blockName": "red_mushroom", "quantity": 5}' \
+     http://192.168.1.25:3000/command
+```
+
+茶色いキノコを採取する
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"type": "setMiningMode", "mode": "on", "blockName": "brown_mushroom", "quantity": 5}' \
+     http://192.168.1.25:3000/command
+```
+
+採掘をやめる
+```
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"type": "setMiningMode", "mode": "off"}' \
+     http://192.168.1.25:3000/command
+```
+
+
+
+索敵範囲、攻撃範囲を設定する
+```
+curl -X POST -H "Content-Type: application/json" -d '{"type": "setCombatOptions", "maxCombatDistance": 10, "attackRange": 4}' http://192.168.1.25:3000/command
+```
+
 
 ```
 git clone https://github.com/GClue-Lab/minecraft_mcp_server

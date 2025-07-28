@@ -1,0 +1,51 @@
+// src/types/mcp.d.ts v1.9 (修正版)
+
+// (既存の定義は省略)
+
+/**
+ * 'setCombatMode' コマンドの型定義
+ */
+export interface SetCombatModeCommand extends BaseMcpCommand { // <<< export
+    type: 'setCombatMode';
+    mode: 'on' | 'off';
+}
+
+/**
+ * 'setCombatOptions' コマンドの型定義 (新規追加)
+ */
+export interface SetCombatOptionsCommand extends BaseMcpCommand {
+    type: 'setCombatOptions';
+    maxCombatDistance?: number;
+    attackRange?: number;
+}
+
+/**
+ * 'setFollowMode' コマンドの型定義
+ */
+export interface SetFollowModeCommand extends BaseMcpCommand { // <<< export
+    type: 'setFollowMode';
+    mode: 'on' | 'off';
+    targetPlayer?: string;
+}
+
+// (既存の定義は省略)
+
+
+/**
+ * MCPサーバーが受け入れる全てのコマンドの結合型
+ */
+export type McpCommand = // <<< export
+    | FollowPlayerCommand
+    | SendMessageCommand
+    | GetStatusCommand
+    | MineBlockCommand
+    | AttackMobCommand
+    | StopCommand
+    | ConnectCommand
+    | SetCombatModeCommand
+    | SetCombatOptionsCommand  // <<< 新規追加
+    | SetFollowModeCommand
+    | SetBehaviorPriorityCommand
+    | TeleportCommand;
+
+// (以降の定義は変更なし)
