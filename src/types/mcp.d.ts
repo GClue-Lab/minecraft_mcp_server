@@ -1,11 +1,11 @@
-// src/types/mcp.d.ts (最終版 - AttackMobCommandにmaxAttemptsを追加)
+// src/types/mcp.d.ts v1.3
 
 /**
  * MCPサーバーが受け取る基本的なコマンド構造
  */
 export interface BaseMcpCommand {
-    type: string; // コマンドの種類（例: 'followPlayer', 'sendMessage', 'getStatus'）
-    id?: string;  // コマンドの一意なID（オプション、LLMがリクエストを追跡するために使用）
+    type: string;
+    id?: string;
 }
 
 /**
@@ -13,11 +13,11 @@ export interface BaseMcpCommand {
  */
 export interface FollowPlayerCommand extends BaseMcpCommand {
     type: 'followPlayer';
-    targetPlayer: string; // 追従するプレイヤー名
+    targetPlayer: string;
     distanceThreshold?: number; // プレイヤーに近づく目標距離
     recheckInterval?: number;   // 追従ロジックを再確認する間隔 (ミリ秒)
-    maxPathfindingAttempts?: number; // 経路探索の最大試行回数 (失敗時)
-    maxFallbackPathfindingRange?: number; // 新規追加: ジャンプで越えられない場合に迂回を試みる範囲
+    // maxPathfindingAttempts はもはや不要なので削除
+    // maxFallbackPathfindingRange はもはや不要なので削除
 }
 
 /**
@@ -44,6 +44,7 @@ export interface MineBlockCommand extends BaseMcpCommand {
     blockName?: string | null;
     quantity?: number;
     maxDistance?: number;
+    // maxPathfindingAttempts はもはや不要なので削除
 }
 
 /**
@@ -55,7 +56,7 @@ export interface AttackMobCommand extends BaseMcpCommand {
     maxCombatDistance?: number; // ターゲットを探す最大距離
     attackRange?: number; // ターゲットに近づく距離 (攻撃できる距離)
     stopAfterKill?: boolean; // 1体倒したら停止するかどうか
-    maxAttempts?: number; // <<<< ここが重要: これが存在するか確認します <<<<
+    // maxAttempts はもはや不要なので削除
 }
 
 /**
@@ -81,15 +82,15 @@ export interface SetCombatModeCommand extends BaseMcpCommand {
 }
 
 /**
- * 'teleport' コマンドの型定義 (新規追加)
+ * 'teleport' コマンドの型定義
  */
 export interface TeleportCommand extends BaseMcpCommand {
     type: 'teleport';
     x: number;
     y: number;
     z: number;
-    // 必要であれば、yaw, pitchなども追加可能
 }
+
 
 /**
  * MCPサーバーが受け入れる全てのコマンドの結合型

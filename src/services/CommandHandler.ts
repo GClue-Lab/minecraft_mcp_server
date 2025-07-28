@@ -1,7 +1,7 @@
-// src/services/CommandHandler.ts v1.2
+// src/services/CommandHandler.ts v1.4
 
 import * as mineflayer from 'mineflayer';
-import { Vec3 } from 'vec3'; // Vec3はここからインポート
+// import { Vec3 } from 'vec3'; // <<<< 削除 (Vec3はもはや不要なため)
 
 import {
     McpCommand,
@@ -16,7 +16,7 @@ import {
     StopCommand,
     ConnectCommand,
     SetCombatModeCommand,
-    TeleportCommand, // 追加: TeleportCommandをインポート
+    TeleportCommand,
     BaseMcpCommand
 } from '../types/mcp';
 
@@ -65,11 +65,9 @@ export class CommandHandler {
             return this.handleSetCombatMode(command as SetCombatModeCommand);
         }
 
-        // --- TeleportCommand はボット接続後であればいつでも実行可能 ---
         if (command.type === 'teleport') {
             return await this.handleTeleport(command as TeleportCommand);
         }
-        // --- 修正終わり ---
 
         const bot = this.botManager.getBot();
         if (!bot) {
@@ -121,7 +119,7 @@ export class CommandHandler {
             botStatus: BotStatus;
             botHealth: number | null;
             botFood: number | null;
-            botPosition: Vec3 | null;
+            botPosition: {x: number, y: number, z: number} | null;
             currentBehavior: CurrentBehavior | null | undefined;
             nearbyPlayers: WorldEntity[];
             nearbyHostileMobs: WorldEntity[];
@@ -132,7 +130,7 @@ export class CommandHandler {
             botPosition: botPosition,
             currentBehavior: currentBehavior,
             nearbyPlayers: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => e.type === 'player' && e.id !== bot?.entity.id && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
-            nearbyHostileMobs: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob' || e.type === 'object') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
+            nearbyHostileMobs: this.worldKnowledge ? this.worldKnowledge.getAllEntities().filter(e => (e.type === 'mob') && e.name && !['cow', 'pig', 'sheep', 'chicken'].includes(e.name.toLowerCase()) && (bot?.entity.position.distanceTo(e.position) || 0) < 50) : [],
         };
         console.log('[STATUS] Bot status requested.');
         return this.createSuccessResponse(command.id, 'Current bot status.', status);
@@ -144,8 +142,8 @@ export class CommandHandler {
             targetPlayer: command.targetPlayer,
             distanceThreshold: command.distanceThreshold !== undefined ? command.distanceThreshold : undefined,
             recheckInterval: command.recheckInterval !== undefined ? command.recheckInterval : undefined,
-            maxPathfindingAttempts: command.maxPathfindingAttempts !== undefined ? command.maxPathfindingAttempts : undefined,
-            maxFallbackPathfindingRange: command.maxFallbackPathfindingRange !== undefined ? command.maxFallbackPathfindingRange : undefined,
+            // maxPathfindingAttempts はもはや不要なので削除
+            // maxFallbackPathfindingRange はもはや不要なので削除
         };
         const started = await this.behaviorEngine.startBehavior('followPlayer', options);
         if (started) {
@@ -192,7 +190,7 @@ export class CommandHandler {
             maxCombatDistance: command.maxCombatDistance !== undefined ? command.maxCombatDistance : undefined,
             attackRange: command.attackRange !== undefined ? command.attackRange : undefined,
             stopAfterKill: command.stopAfterKill !== undefined ? command.stopAfterKill : undefined,
-            maxAttempts: command.maxAttempts !== undefined ? command.maxAttempts : undefined,
+            // maxAttempts はもはや不要なので削除
         };
         const started = await this.behaviorEngine.startBehavior('combat', options);
         if (started) {
@@ -223,17 +221,13 @@ export class CommandHandler {
         }
         try {
             const { x, y, z } = command;
-            // creative.teleportTo() は存在しないため、bot.chat('/tp ...') を使用
             bot.chat(`/tp ${bot.username} ${x} ${y} ${z}`);
-            // テレポートは非同期で完了するため、少し待つか、チャットイベントで確認するのが理想的だが、
-            // ここではコマンド送信の成功をすぐに返す
-            await new Promise(resolve => setTimeout(resolve, 500)); // 少し待ってコマンドがサーバーに届くのを確実にする
+            await new Promise(resolve => setTimeout(resolve, 500));
             return this.createSuccessResponse(command.id, `Teleported bot to ${x}, ${y}, ${z}.`);
         } catch (error: any) {
             return this.createErrorResponse(command.id, `Failed to teleport bot: ${error.message || 'Unknown error'}`);
         }
     }
-
 
     private createSuccessResponse(commandId: string | undefined, message: string, data?: any): SuccessMcpResponse {
         return { status: 'success', commandId, message, data };

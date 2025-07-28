@@ -1,8 +1,9 @@
-// src/services/WorldKnowledge.ts v1.14
+// src/services/WorldKnowledge.ts v1.20 (Pathfinder依存削除)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
-import { pathfinder as pathfinderPlugin, goals, Pathfinder, Path } from 'mineflayer-pathfinder';
+// pathfinder, goals, Pathfinder, Path, Movements は mineflayer-pathfinder から来るので削除
+// import { pathfinder as pathfinderPlugin, goals, Pathfinder, Path, Movements } from 'mineflayer-pathfinder';
 
 type Entity = Parameters<mineflayer.BotEvents['entitySpawn']>[0];
 type Block = Parameters<mineflayer.BotEvents['blockUpdate']>[1];
@@ -22,11 +23,11 @@ export class WorldKnowledge {
     private bot: mineflayer.Bot;
     private entities: Map<number, WorldEntity> = new Map();
     private players: Map<string, WorldEntity> = new Map();
-    private isPathfindingActive: boolean = false; // 経路探索が現在アクティブかどうかのフラグ
+    // private isPathfindingActive: boolean = false; // <<<< 削除
 
     constructor(bot: mineflayer.Bot) {
         this.bot = bot;
-        this.bot.loadPlugin(pathfinderPlugin);
+        // this.bot.loadPlugin(pathfinderPlugin); // <<<< 削除
         this.setupEventListeners();
         console.log('WorldKnowledge initialized. Monitoring world events...');
     }
@@ -37,18 +38,24 @@ export class WorldKnowledge {
             this.bot.removeAllListeners();
         }
         this.bot = newBot;
-        this.bot.loadPlugin(pathfinderPlugin);
+        // this.bot.loadPlugin(pathfinderPlugin); // <<<< 削除
         this.setupEventListeners();
         this.clearKnowledge('Bot instance updated');
         console.log('WorldKnowledge: Bot instance updated and listeners re-setup.');
     }
+
+    // isPathfindingInProgress メソッドは Pathfinder 依存なので削除
+    // public isPathfindingInProgress(): boolean {
+    //     return this.isPathfindingActive;
+    // }
 
     private setupEventListeners(): void {
         if (this.bot) {
             this.bot.removeAllListeners();
         }
         
-        console.log("WorldKnowledge: Pathfinder movements will use default configuration.");
+        // "WorldKnowledge: Pathfinder movements will use default configuration." // <<<< 削除
+        console.log("WorldKnowledge: Initializing core event listeners."); // ログメッセージを修正
 
         this.bot.on('entitySpawn', (entity: Entity) => this.handleEntitySpawn(entity));
         this.bot.on('entityGone', (entity: Entity) => this.handleEntityGone(entity));
@@ -59,6 +66,11 @@ export class WorldKnowledge {
         this.bot.on('blockUpdate', (oldBlock: Block | null, newBlock: Block) => this.handleBlockUpdate(oldBlock, newBlock));
         this.bot.on('kicked', (reason: string) => this.clearKnowledge(reason));
         this.bot.on('end', (reason: string) => this.clearKnowledge(reason));
+
+        // goal_reached, goal_cant_be_reached, goal_timeout イベントリスナーは Pathfinder 依存なので削除
+        // bot.once('goal_reached', onGoalReached);
+        // bot.once('goal_cant_be_reached', onGoalCantBeReached);
+        // bot.once('goal_timeout', onGoalTimeout);
 
         this.bot.once('spawn', () => { 
             console.log('Bot spawned. Populating initial world knowledge.');
@@ -186,73 +198,13 @@ export class WorldKnowledge {
         return block;
     }
 
-    public async findPath(startPos: Vec3, endPos: Vec3, range: number = 1): Promise<Path | null> {
-        if (!this.bot.pathfinder) {
-            console.warn("Pathfinder not loaded on bot.");
-            return null;
-        }
+    // findPath メソッドは mineflayer-pathfinder 依存なので削除
+    // public async findPath(startPos: Vec3, endPos: Vec3, range: number = 1): Promise<Path | null> {
+    //    ...
+    // }
 
-        if (this.isPathfindingActive) {
-            console.log("WorldKnowledge: Pathfinding already active. Skipping new request.");
-            return null;
-        }
-
-        this.isPathfindingActive = true;
-
-        const goal = new goals.GoalNear(endPos.x, endPos.y, endPos.z, range);
-        
-        // --- ここを修正: Goalにタイムアウトを設定 ---
-        // PathfinderOptions (Goalの第2引数) に timeout プロパティを設定
-        // デフォルトは60000 (60秒) ですが、短くして素早くタイムアウトさせる
-        (goal as any).timeout = 5000; // 5秒でタイムアウト (goals.jsの内部プロパティに直接設定)
-        // または、bot.pathfinder.setGoal(goal, { timeout: 5000 }); のようにsetGoalの第二引数に渡す (PathfinderOptions)
-        // 現状のPathfinder型定義にはsetGoalの第二引数がないため、goalオブジェクトに直接プロパティを追加
-        // ※ もし `mineflayer-pathfinder` のバージョンが新しい場合、`goals.Goal` のコンストラクタが `timeout` を受け取るかもしれません。
-        // ※ あるいは `bot.pathfinder.setGoal(goal, options)` のように options を渡す形式の場合もあります。
-        // 現在の `mineflayer-pathfinder@2.4.5` の `goals.js` ソースコードを見ると、
-        // Goalオブジェクトに直接 `timeout` プロパティを設定する形は一般的ではないようです。
-        // setGoal の第二引数に `{ timeout: number }` を渡すのがより正しい方法です。
-        // ただし、型定義がそれを許容しないため、一旦 `any` でアサーションします。
-        this.bot.pathfinder.setGoal(goal, { timeout: 5000 } as any); // setGoalの第二引数でタイムアウトを設定 (anyアサーション)
-        // --- 修正終わり ---
-
-        console.log(`Pathfinding started towards ${endPos.x},${endPos.y},${endPos.z} (range: ${range})`);
-
-        return new Promise<Path | null>((resolve) => {
-            const cleanUpListeners = () => {
-                this.bot.removeListener('goal_reached', onGoalReached);
-                this.bot.removeListener('goal_cant_be_reached', onGoalCantBeReached);
-                this.bot.removeListener('goal_timeout', onGoalTimeout);
-                this.isPathfindingActive = false; // 経路探索終了フラグを解除
-            };
-
-            const onGoalReached = () => {
-                cleanUpListeners();
-                console.log(`Pathfinding: Goal reached at ${endPos.x},${endPos.y},${endPos.z}.`);
-                resolve({ result: 'success', movements: [] } as Path);
-            };
-            const onGoalCantBeReached = () => {
-                cleanUpListeners();
-                console.warn(`Path to ${endPos} with range ${range} could not be found.`);
-                resolve(null);
-            };
-            const onGoalTimeout = () => {
-                cleanUpListeners();
-                console.warn(`Path to ${endPos} with range ${range} timed out.`);
-                resolve(null);
-            };
-
-            this.bot.once('goal_reached', onGoalReached);
-            this.bot.once('goal_cant_be_reached', onGoalCantBeReached);
-            this.bot.once('goal_timeout', onGoalTimeout);
-        });
-    }
-
-    public stopPathfinding(): void {
-        if (this.bot.pathfinder) {
-            this.bot.pathfinder.stop();
-            this.isPathfindingActive = false; 
-            console.log("Pathfinding stopped.");
-        }
-    }
+    // stopPathfinding メソッドは mineflayer-pathfinder 依存なので削除
+    // public stopPathfinding(): void {
+    //    ...
+    // }
 }

@@ -1,11 +1,11 @@
-// src/services/BehaviorEngine.ts v1.2
+// src/services/BehaviorEngine.ts v1.5
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge, WorldEntity } from './WorldKnowledge';
 import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
 import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
 import { CombatBehavior, CombatOptions } from '../behaviors/combat';
-import { Vec3 } from 'vec3';
+import { Vec3 } from 'vec3'; // Vec3 をインポートし直す
 import { BotManager } from './BotManager';
 
 // 行動の種類と優先順位を定義
@@ -75,25 +75,29 @@ export class BehaviorEngine {
         this.bot.on('health', () => {
             const botHealth = this.bot.health;
             if (botHealth && botHealth < 20) {
-                this.tryInterruptForCombat(true); // 引数を渡す
+                this.tryInterruptForCombat(true);
             }
         });
+        
+        this.interruptMonitorInterval = setInterval(() => {
+            if (this.combatModeEnabled) {
+                this.tryInterruptForCombat(false);
+            }
+        }, this.MONITOR_INTERVAL_MS);
     }
 
-    // 新規追加: 割り込み監視のインターバルを開始するメソッド
-    private startInterruptMonitor(): void {
+    private startInterruptMonitor(): void { // <<<< このメソッドの定義を追加
         if (this.interruptMonitorInterval) {
             clearInterval(this.interruptMonitorInterval);
         }
         this.interruptMonitorInterval = setInterval(() => {
             if (this.combatModeEnabled) {
-                this.tryInterruptForCombat(false); // 引数を渡す
+                this.tryInterruptForCombat(false);
             }
         }, this.MONITOR_INTERVAL_MS);
     }
 
-    // 新規追加: 警戒モードを設定するメソッド
-    public setCombatMode(enabled: boolean): void {
+    public setCombatMode(enabled: boolean): void { // <<<< このメソッドの定義を追加
         this.combatModeEnabled = enabled;
         console.log(`BehaviorEngine: Combat Mode set to ${enabled ? 'ON' : 'OFF'}.`);
         if (enabled && this.currentBehaviorName !== 'combat') {
@@ -105,8 +109,7 @@ export class BehaviorEngine {
         }
     }
 
-    // tryInterruptForCombat メソッドの引数を修正
-    private tryInterruptForCombat(forceInterrupt: boolean): void { // 引数を受け取る
+    private tryInterruptForCombat(forceInterrupt: boolean): void {
         const botEntity = this.worldKnowledge.getBotEntity();
         if (!botEntity) return;
 
@@ -114,7 +117,7 @@ export class BehaviorEngine {
             e.type === 'mob' &&
             e.isAlive &&
             (e.name === 'zombie' || e.name === 'skeleton' || e.name === 'spider' || e.name === 'creeper' || e.name === 'enderman') &&
-            botEntity.position.distanceTo(e.position) <= (forceInterrupt ? 32 : 16)
+            botEntity.position.distanceTo(e.position) <= (this.combatModeEnabled ? 16 : 32)
         );
 
         if (nearbyHostileMob) {
@@ -231,7 +234,7 @@ export class BehaviorEngine {
             case 'idle':
                 console.log('Bot is now idle.');
                 this.bot.clearControlStates();
-                this.worldKnowledge.stopPathfinding();
+                // this.worldKnowledge.stopPathfinding(); // <<<< 削除
                 behaviorStarted = true;
                 break;
             default:
@@ -299,6 +302,6 @@ export class BehaviorEngine {
         }
         this.currentBehaviorName = null;
         this.bot.clearControlStates();
-        this.worldKnowledge.stopPathfinding();
+        // this.worldKnowledge.stopPathfinding(); // <<<< 削除
     }
 }

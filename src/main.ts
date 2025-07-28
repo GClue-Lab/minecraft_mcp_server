@@ -1,4 +1,4 @@
-// src/main.ts v1.2 (修正 - debug.enableコード削除)
+// src/main.ts v1.3
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -6,7 +6,6 @@ import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
 import { McpApi } from './api/mcpApi';
 import * as mineflayer from 'mineflayer';
-// import { Console } from 'console'; // Consoleモジュールは不要なので削除
 
 // 環境変数を読み込む
 const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
@@ -14,9 +13,10 @@ const MINECRAFT_SERVER_PORT = parseInt(process.env.MINECRAFT_SERVER_PORT || '255
 const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_CLI_Bot';
 const MCP_SERVER_PORT = parseInt(process.env.MCP_SERVER_PORT || '3000', 10);
 
-// --- ここを修正: debug.enable のコードを削除 ---
-// 代わりに、サーバー起動時にコマンドラインで NODE_DEBUG=mineflayer-pathfinder を設定する
-console.log('mineflayer-pathfinder debug logging will be controlled by NODE_DEBUG environment variable.');
+// --- ここを修正: minecraft-protocol のデバッグログを有効にする ---
+// NODE_DEBUG 環境変数で複数のデバッグネームスペースを指定できる
+// 例: NODE_DEBUG=mineflayer-pathfinder,minecraft-protocol npm start
+console.log('minecraft-protocol debug logging will be controlled by NODE_DEBUG environment variable (e.g., NODE_DEBUG=minecraft-protocol).');
 // --- 修正終わり ---
 
 let commandHandler: CommandHandler;

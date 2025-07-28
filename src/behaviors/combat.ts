@@ -1,27 +1,35 @@
-// src/behaviors/combat.ts (修正版 - pause/resume/canInterrupt/getOptions)
+// src/behaviors/combat.ts v1.3 (基本移動ロジックとクールダウン修正)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
-import { goals } from 'mineflayer-pathfinder';
-import { Vec3 } from 'vec3';
-import { BehaviorName } from '../services/BehaviorEngine'; // BehaviorNameをインポート
+// goals と Path は mineflayer-pathfinder から来るので削除
+// import { goals } from 'mineflayer-pathfinder';
+// import { Path } from 'mineflayer-pathfinder';
+import { Vec3 } from 'vec3'; // Vec3 は引き続き必要
+import { BehaviorName } from '../services/BehaviorEngine';
 
+/**
+ * 戦闘行動のオプションインターフェース
+ */
 export interface CombatOptions {
     targetMobName?: string;
     maxCombatDistance?: number;
     attackRange?: number;
     stopAfterKill?: boolean;
-    maxAttempts?: number;
+    // maxAttempts?: number; // <<<< 削除済み
 }
 
+/**
+ * 敵対モブと戦闘する行動を管理するクラス
+ */
 export class CombatBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private options: Required<CombatOptions>;
     private isActive: boolean = false;
-    private isPaused: boolean = false; // 一時停止フラグ
+    private isPaused: boolean = false;
     private currentTargetEntityId: number | null = null;
-    private currentAttempts: number = 0;
+    // private currentAttempts: number = 0; // <<<< 削除済み
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: CombatOptions) {
         this.bot = bot;
@@ -32,13 +40,10 @@ export class CombatBehavior {
             maxCombatDistance: options.maxCombatDistance ?? 64,
             attackRange: options.attackRange ?? 3,
             stopAfterKill: options.stopAfterKill ?? true,
-            maxAttempts: options.maxAttempts ?? 0,
+            // maxAttempts: options.maxAttempts ?? 0, // <<<< 削除済み
         };
 
-        if (!this.options.targetMobName) {
-            throw new Error('CombatBehavior requires a targetMobName option.');
-        }
-        console.log(`CombatBehavior initialized for target: ${this.options.targetMobName} (Max Distance: ${this.options.maxCombatDistance}, Max Attempts: ${this.options.maxAttempts === 0 ? 'Infinite' : this.options.maxAttempts})`);
+        console.log(`CombatBehavior initialized for target: ${this.options.targetMobName} (Max Distance: ${this.options.maxCombatDistance})`);
     }
 
     public async start(): Promise<boolean> {
@@ -48,12 +53,12 @@ export class CombatBehavior {
         }
 
         this.isActive = true;
-        this.isPaused = false; // 開始時にポーズ解除
+        this.isPaused = false;
         this.currentTargetEntityId = null;
-        this.currentAttempts = 0;
+        // this.currentAttempts = 0; // <<<< 削除済み
         console.log(`Starting CombatBehavior for ${this.options.targetMobName}...`);
 
-        return this.executeCombatLogic();
+        return this.executeCombatLogic(); // 初回実行と継続ロジック
     }
 
     public stop(): void {
@@ -64,9 +69,9 @@ export class CombatBehavior {
 
         console.log(`Stopping CombatBehavior.`);
         this.isActive = false;
-        this.isPaused = false; // 停止時はポーズも解除
-        this.bot.clearControlStates();
-        this.worldKnowledge.stopPathfinding();
+        this.isPaused = false;
+        this.bot.clearControlStates(); // ボットの制御状態をリセット
+        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.currentTargetEntityId = null;
     }
 
@@ -74,104 +79,105 @@ export class CombatBehavior {
         return this.isActive && !this.isPaused;
     }
 
-    // --- 新規追加: BehaviorInstance インターフェースのメソッド ---
     public pause(): void {
         if (!this.isActive || this.isPaused) return;
         console.log(`CombatBehavior: Pausing.`);
         this.isPaused = true;
-        this.worldKnowledge.stopPathfinding();
+        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.bot.clearControlStates();
-        // 必要であれば、現在の戦闘状態（ターゲットなど）を保存
     }
 
     public resume(): void {
         if (!this.isActive || !this.isPaused) return;
         console.log(`CombatBehavior: Resuming.`);
         this.isPaused = false;
-        // ロジックを再開
         this.executeCombatLogic(); // 停止した地点から再開を試みる
     }
 
     public canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean {
-        // 戦闘行動は基本的に最高優先度なので、他の行動では中断されない
-        // ただし、もし緊急脱出などの超高優先度行動があればここで定義
-        return false;
+        return false; // 戦闘行動は基本的に最高優先度なので、他の行動では中断されない
     }
 
     public getOptions(): CombatOptions {
         return this.options;
     }
-    // --- End 新規追加 ---
 
+    /**
+     * 戦闘のメインロジック。
+     */
     private async executeCombatLogic(): Promise<boolean> {
-        while (this.isActive && !this.isPaused) { // ポーズ中はロジックを実行しない
-            if (this.options.maxAttempts > 0 && this.currentAttempts >= this.options.maxAttempts) {
-                console.log(`CombatBehavior: Max attempts (${this.options.maxAttempts}) reached. No target found. Stopping.`);
-                this.stop();
-                return false;
-            }
+        while (this.isActive && !this.isPaused) {
+            console.log(`CombatBehavior: Looking for target mob: ${this.options.targetMobName} within ${this.options.maxCombatDistance} blocks.`);
 
-            console.log(`CombatBehavior: Looking for target mob: ${this.options.targetMobName} within ${this.options.maxCombatDistance} blocks. (Attempt ${this.currentAttempts + 1}/${this.options.maxAttempts === 0 ? 'Infinite' : this.options.maxAttempts})`);
-
+            // 最寄りのターゲットモブを見つける
             const targetMob = this.worldKnowledge.getAllEntities().find(entity =>
                 entity.type === 'mob' &&
                 entity.name === this.options.targetMobName &&
-                entity.isAlive &&
+                (entity as any).isAlive && // MineflayerのEntityはisValidプロパティを持つが、isAliveは保証されないのでanyで
                 this.bot.entity.position.distanceTo(entity.position) <= this.options.maxCombatDistance
             );
 
             if (!targetMob) {
                 console.log(`CombatBehavior: No target mob (${this.options.targetMobName}) found within ${this.options.maxCombatDistance} blocks. Waiting...`);
-                this.currentAttempts++;
+                // this.currentAttempts++; // <<<< 削除済み
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 continue;
             }
 
             this.currentTargetEntityId = targetMob.id;
             console.log(`CombatBehavior: Found target ${targetMob.name} at ${targetMob.position} (ID: ${targetMob.id})`);
-            this.currentAttempts = 0; // ターゲットを見つけたら試行回数をリセット
+            // this.currentAttempts = 0; // <<<< 削除済み
 
             const botPosition = this.bot.entity.position;
-            const targetPos = targetMob.position;
+            const targetPos = targetMob.position.offset(0, (targetMob as any).height || 1.6, 0); // ターゲットのY座標を調整
 
-            const pathResult = await this.worldKnowledge.findPath(botPosition, targetPos, this.options.attackRange);
+            const distance = botPosition.distanceTo(targetPos); // ターゲットY座標調整後の距離
 
-            if (!pathResult) {
-                console.warn(`CombatBehavior: Could not find path to mob ${targetMob.name}. Retrying...`);
-                this.currentAttempts++;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            if (distance > this.options.attackRange) {
+                console.log(`CombatBehavior: Moving towards ${targetMob.name} at ${targetPos}. Distance: ${distance.toFixed(2)}.`);
+                this.bot.lookAt(targetPos, true); // ターゲットの方向を向く
+                this.bot.setControlState('forward', true); // 前に進む
+                // 簡易的なジャンプロジック (段差を越えるため)
+                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5); 
+                await new Promise(resolve => setTimeout(resolve, 200)); // 少しだけ移動する時間を与える
                 continue;
+            } else {
+                this.bot.clearControlStates(); // 攻撃範囲内なら移動を停止
+                this.bot.lookAt(targetPos, true); // 攻撃前に方向を向く
             }
 
             const currentTarget = this.bot.entities[this.currentTargetEntityId!];
-            if (!currentTarget || !currentTarget.isValid || currentTarget.position.distanceTo(this.bot.entity.position) > this.options.attackRange) {
+            if (!currentTarget || !(currentTarget as any).isValid || currentTarget.position.distanceTo(this.bot.entity.position) > this.options.attackRange) {
                 console.log(`CombatBehavior: Target ${targetMob.name} moved out of range or disappeared. Re-evaluating.`);
                 this.currentTargetEntityId = null;
-                this.currentAttempts++;
+                // this.currentAttempts++; // <<<< 削除済み
                 continue;
             }
 
+            // 攻撃
             try {
                 console.log(`CombatBehavior: Attacking ${currentTarget.name} (ID: ${currentTarget.id})...`);
                 this.bot.attack(currentTarget);
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // ここを修正: this.bot.attackDelay の代わりに固定のクールダウン時間
+                await new Promise(resolve => setTimeout(resolve, 500)); // 攻撃クールダウンを考慮 (例: 500ms)
             } catch (err: any) {
                 console.error(`CombatBehavior: Failed to attack mob ${currentTarget.name}: ${err.message}`);
                 this.currentTargetEntityId = null;
-                this.currentAttempts++;
+                // this.currentAttempts++; // <<<< 削除済み
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
 
+            // ターゲットが倒されたか確認
             const finalTargetCheck = this.bot.entities[this.currentTargetEntityId!];
-            if (!finalTargetCheck || !finalTargetCheck.isValid) {
+            if (!finalTargetCheck || !(finalTargetCheck as any).isValid) {
                 console.log(`CombatBehavior: Target ${targetMob.name} defeated or disappeared.`);
                 if (this.options.stopAfterKill) {
                     this.stop();
-                    return true;
+                    return true; // 1体倒したら終了
                 } else {
-                    this.currentTargetEntityId = null;
-                    this.currentAttempts = 0;
+                    this.currentTargetEntityId = null; // 次のターゲットを探す
+                    // this.currentAttempts = 0; // <<<< 削除済み
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
             }

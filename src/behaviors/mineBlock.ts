@@ -1,9 +1,11 @@
-// src/behaviors/mineBlock.ts (最終最終最終修正版 - blockId undefinedチェック)
+// src/behaviors/mineBlock.ts v1.4 (基本移動ロジック)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
-import { goals } from 'mineflayer-pathfinder';
-import { Vec3 } from 'vec3';
+// goals と Path は mineflayer-pathfinder から来るので削除
+// import { goals } from 'mineflayer-pathfinder';
+// import { Path } from 'mineflayer-pathfinder';
+import { Vec3 } from 'vec3'; // Vec3 は引き続き必要
 import { Block } from 'prismarine-block';
 import { BehaviorName } from '../services/BehaviorEngine';
 
@@ -17,6 +19,7 @@ export interface MineBlockOptions {
     blockName?: string | null;
     quantity?: number;
     maxDistance?: number;
+    // maxPathfindingAttempts?: number; // <<<< 削除済み
 }
 
 /**
@@ -76,8 +79,8 @@ export class MineBlockBehavior {
         console.log(`Stopping MineBlockBehavior.`);
         this.isActive = false;
         this.isPaused = false;
-        this.bot.clearControlStates();
-        this.worldKnowledge.stopPathfinding();
+        this.bot.clearControlStates(); // ボットの制御状態をリセット
+        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.currentTargetBlock = null;
     }
 
@@ -89,7 +92,7 @@ export class MineBlockBehavior {
         if (!this.isActive || this.isPaused) return;
         console.log(`MineBlockBehavior: Pausing.`);
         this.isPaused = true;
-        this.worldKnowledge.stopPathfinding();
+        // this.worldKnowledge.stopPathfinding(); // <<<< 削除済み
         this.bot.clearControlStates();
     }
 
@@ -118,11 +121,10 @@ export class MineBlockBehavior {
             console.log(`MineBlockBehavior: Looking for target block. Mined: ${this.minedCount}/${this.options.quantity}`);
             
             let blockIdsToFind: number[] = [];
-            // ここを修正: this.options.blockId が undefined でないことを確認し、number型に絞り込む
             if (typeof this.options.blockId === 'number') {
                 blockIdsToFind.push(this.options.blockId);
-            } else if (typeof this.options.blockName === 'string') { // string型であることを確認
-                const blockByName = (Object.values(this.bot.registry.blocks) as MineflayerRegistryBlockInfo[]).find(
+            } else if (typeof this.options.blockName === 'string') {
+                const blockByName = (Object.values(this.bot.registry.blocks) as any[]).find(
                     (b: any) => b.name === this.options.blockName
                 );
                 
@@ -152,13 +154,22 @@ export class MineBlockBehavior {
             const botPosition = this.bot.entity.position;
             const targetPos = targetBlock.position;
 
-            const pathResult = await this.worldKnowledge.findPath(botPosition, targetPos, 1);
+            const distanceToBlock = botPosition.distanceTo(targetPos);
 
-            if (!pathResult) {
-                console.warn(`MineBlockBehavior: Could not find path to block ${targetBlock.displayName}. Retrying...`);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                continue;
+            // --- ここを修正: Pathfinderを使わない基本移動ロジック ---
+            if (distanceToBlock > 1.5) { // 採掘できる距離まで近づく
+                console.log(`MineBlockBehavior: Moving towards block ${targetBlock.displayName} at ${targetPos}. Distance: ${distanceToBlock.toFixed(2)}.`);
+                this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true); // ブロックの中心を向く
+                this.bot.setControlState('forward', true); // 前に進む
+                // 必要であれば簡易的なジャンプロジックを追加
+                this.bot.setControlState('jump', this.bot.entity.onGround && targetPos.y > botPosition.y + 0.5);
+                await new Promise(resolve => setTimeout(resolve, 200)); // 少しだけ移動する時間を与える
+                continue; // 移動後、次のループで再度距離を確認
+            } else {
+                this.bot.clearControlStates(); // 採掘範囲内なら移動を停止
+                this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5), true); // 採掘前にブロックの中心を向く
             }
+            // --- 修正終わり ---
             
             if (!this.bot.canDigBlock(targetBlock)) {
                 console.warn(`MineBlockBehavior: Cannot dig block ${targetBlock.displayName} at ${targetBlock.position}. Skipping.`);

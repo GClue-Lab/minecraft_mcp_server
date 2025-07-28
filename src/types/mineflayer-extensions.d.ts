@@ -1,13 +1,15 @@
-// src/types/mineflayer-extensions.d.ts v1.2
+// src/types/mineflayer-extensions.d.ts v1.4 (pathfinderイベント削除)
 
 import { EventEmitter } from 'events';
 import { Block as PrismarineBlock } from 'prismarine-block';
 import { Entity as PrismarineEntity } from 'prismarine-entity';
-import { IndexedData } from 'minecraft-data'; 
+import { IndexedData } from 'minecraft-data';
+import * as mineflayer from 'mineflayer';
 
 declare module 'mineflayer' {
     interface Bot {
-        pathfinder: import('mineflayer-pathfinder').Pathfinder & EventEmitter;
+        // pathfinderプロパティはもはやBotに追加されないため、ここから削除
+        // pathfinder: import('mineflayer-pathfinder').Pathfinder & EventEmitter; // <<< 削除
         entity: PrismarineEntity;
         entities: { [id: number]: PrismarineEntity };
         registry: IndexedData;
@@ -21,42 +23,13 @@ declare module 'mineflayer' {
         playerJoined: (player: mineflayer.Player) => void;
         playerLeft: (player: mineflayer.Player) => void;
 
-        goal_reached: () => void;
-        goal_cant_be_reached: () => void;
-        goal_timeout: () => void;
+        // --- mineflayer-pathfinder 関連イベントの削除 ---
+        // goal_reached: () => void; // <<< 削除
+        // goal_cant_be_reached: () => void; // <<< 削除
+        // goal_timeout: () => void; // <<< 削除
+        // --- End mineflayer-pathfinder 関連イベント ---
     }
 }
 
-// mineflayer-pathfinder の型定義を拡張
-declare module 'mineflayer-pathfinder' {
-    interface Pathfinder extends EventEmitter {
-        getPathTo(
-            movements: import('mineflayer-pathfinder').Movements,
-            goal: import('mineflayer-pathfinder').goals.Goal,
-            timeout?: number
-        ): Path;
-    }
-
-    interface Path {
-        result: string;
-        movements: Array<any>;
-    }
-
-    // Movements インターフェースを拡張し、足りないプロパティを追加
-    interface Movements {
-        // --- ここに追加 ---
-        canDig: boolean;
-        canOpenDoors: boolean;
-        canBreakDoors: boolean;
-        allowFreecrafting: boolean;
-        allowSprinting: boolean;
-        allowDiagonal: boolean;
-        maxDropDown: number;
-        allowParkour: boolean;
-        scafoldingBlocks: number[];
-        waterCost: number;
-        lavaCost: number;
-        // --- ここまで ---
-        // その他、もし後で必要になったプロパティがあればここに追加
-    }
-}
+// mineflayer-pathfinder の型定義拡張全体を削除（Pathfinderを使用しないため）
+// declare module 'mineflayer-pathfinder' { ... } // <<< 削除

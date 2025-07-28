@@ -1,4 +1,4 @@
-// src/services/BotManager.ts (修正版 - 死亡/リスポーンイベント通知)
+// src/services/BotManager.ts v1.2
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
@@ -56,7 +56,7 @@ export class BotManager {
      */
     public async connect(): Promise<void> {
         if (this.status === 'connecting' || this.status === 'connected') {
-            console.log('Bot is already connecting or connected. Skipping new connection attempt.');
+            console.warn('Bot is already connecting or connected. Skipping new connection attempt.');
             return;
         }
 
@@ -141,9 +141,6 @@ export class BotManager {
         this.bot.on('error', (err) => {
             console.error(`Bot error: ${err.message}`);
             this.setStatus('error');
-            // エラーが発生しても、必ずしもボットが終了したとは限らない
-            // ここではシンプルに、`end`イベントが後で発火することを期待する
-            // または、重大なエラーの場合は強制的に切断・再接続をトリガーする
             this.bot?.end('Error occurred'); // 強制的に切断し、endイベントをトリガー
         });
 
@@ -163,15 +160,20 @@ export class BotManager {
         this.bot.on('death', () => {
             console.log('Bot died!');
             this.botInstanceEventEmitter.emit('death'); // 死亡イベントを通知
-            // 死亡後、通常は'respawn'イベントが続きます
         });
 
         this.bot.on('respawn', () => {
             console.log('Bot respawned!');
             this.botInstanceEventEmitter.emit('respawn'); // リスポーンイベントを通知
-            // リスポーン後の処理はBehaviorEngineやCommandHandlerで行う
         });
         // --- End ボットの死亡/リスポーンイベント ---
+
+        // --- ここを修正: mineflayer-pathfinder 関連イベントリスナーを削除 ---
+        // Pathfinderを使用しないため、これらのイベントは発火しない
+        // this.bot.once('goal_reached', onGoalReached);
+        // this.bot.once('goal_cant_be_reached', onGoalCantBeReached);
+        // this.bot.once('goal_timeout', onGoalTimeout);
+        // --- 修正終わり ---
     }
 
     private cleanupBot(): void {
@@ -187,7 +189,7 @@ export class BotManager {
 
     private scheduleReconnect(): void {
         if (this.reconnectTimeout) {
-            console.log('Reconnect already scheduled.');
+            console.warn('Reconnect already scheduled.');
             return;
         }
 
