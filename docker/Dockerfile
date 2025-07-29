@@ -20,8 +20,9 @@ ENV MCP_SERVER_PORT=3000
 COPY package*.json ./
 RUN npm install
 
-# ソースコードをコピー
-COPY . .
+# 必要なソースコードと設定ファイルをコピー
+COPY src ./src
+COPY tsconfig.json ./
 
 # TypeScriptコードをJavaScriptにコンパイル
 RUN npm run build # package.jsonに "build": "tsc" が必要
