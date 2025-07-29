@@ -1,4 +1,4 @@
-// src/api/mcpApi.ts v1.4 (修正版)
+// src/api/mcpApi.ts v1.5 (最終修正版)
 
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -24,15 +24,28 @@ export class McpApi {
     }
 
     private configureRoutes(): void {
-        // --- ここからが修正部分 ---
         /**
          * GET /
-         * mcpoからのヘルスチェック（接続確認）に応答するためのエンドポイント
+         * mcpoからのヘルスチェック及びSSE接続要求に応答するためのエンドポイント
          */
         this.app.get('/', (req, res) => {
-            res.status(200).json({ status: 'ok', message: 'Minecraft MCP Server is running.' });
+            // SSEの接続要求に対して、正しいヘッダーを返すように修正
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+            });
+            res.flushHeaders();
+
+            // 接続が確立したことを示すためのコメント行を送信
+            res.write(': sse connection established\n\n');
+
+            // クライアントが接続を切断した際の処理
+            req.on('close', () => {
+                console.log('Client closed SSE connection.');
+                res.end();
+            });
         });
-        // --- 修正部分ここまで ---
 
         /**
          * POST /command
@@ -54,9 +67,7 @@ export class McpApi {
 
     public start(): void {
         this.app.listen(this.port, () => {
-            console.log(`MCP API server started.`);
-            // MCPサーバーが標準出力にメッセージを出すとmcpoがそれを検知してハングすることがあるため、起動後のメッセージはコメントアウトまたは削除します。
-            // console.log(`MCP API server listening on http://localhost:${this.port}`);
+            console.log(`MCP API server started on port ${this.port}`);
         });
     }
 }
