@@ -1,7 +1,8 @@
 ########################################
 # Docker build
 ########################################
-#time sudo docker build --progress plain -t naisy/pc-node22-slim-minecraft-mcp-dev -f Dockerfile_pc_node22_slim_minecraft_mcp_dev .
+# cd ~/data/github/minecraft_mcp_server
+#time sudo docker build --progress plain -t naisy/pc-node22-slim-minecraft-mcp-dev -f docker/Dockerfile .
 
 #ベースイメージ
 FROM node:22-slim
