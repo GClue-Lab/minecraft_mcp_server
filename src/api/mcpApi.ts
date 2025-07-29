@@ -1,79 +1,62 @@
-// src/api/mcpApi.ts
+// src/api/mcpApi.ts v1.4 (修正版)
 
 import express from 'express';
-import { Request, Response } from 'express';
+import bodyParser from 'body-parser';
 import { CommandHandler } from '../services/CommandHandler';
-import { McpCommand, McpResponse } from '../types/mcp'; // 型定義をインポート
+import { McpCommand } from '../types/mcp';
 
-/**
- * MCPサーバーのAPIエンドポイントを提供するクラス
- */
 export class McpApi {
-    private app: express.Application;
-    private port: number;
+    private app: express.Express;
     private commandHandler: CommandHandler;
+    private port: number;
 
-    constructor(commandHandler: CommandHandler, port: number = 3000) {
+    constructor(commandHandler: CommandHandler, port: number) {
         this.app = express();
-        this.port = port;
         this.commandHandler = commandHandler;
-
-        this.setupMiddleware();
-        this.setupRoutes();
-        console.log(`MCP API initialized. Listening on port ${this.port}`);
+        this.port = port;
+        this.configureMiddleware();
+        this.configureRoutes();
+        console.log(`MCP API initialized. Listening on port ${port}`);
     }
 
-    /**
-     * Expressミドルウェアを設定します。
-     */
-    private setupMiddleware(): void {
-        this.app.use(express.json()); // JSON形式のリクエストボディをパースする
-        // CORS設定など、必要に応じて追加
+    private configureMiddleware(): void {
+        this.app.use(bodyParser.json());
     }
 
-    /**
-     * APIルートを設定します。
-     */
-    private setupRoutes(): void {
-        // コマンド処理のエンドポイント
-        this.app.post('/command', async (req: Request, res: Response) => {
-            const command: McpCommand = req.body;
-            console.log(`Received command via API: ${JSON.stringify(command)}`);
+    private configureRoutes(): void {
+        // --- ここからが修正部分 ---
+        /**
+         * GET /
+         * mcpoからのヘルスチェック（接続確認）に応答するためのエンドポイント
+         */
+        this.app.get('/', (req, res) => {
+            res.status(200).json({ status: 'ok', message: 'Minecraft MCP Server is running.' });
+        });
+        // --- 修正部分ここまで ---
 
-            // コマンドのバリデーション（簡易的な例）
+        /**
+         * POST /command
+         * MCPコマンドを受け取り、CommandHandlerに渡すメインのエンドポイント
+         */
+        this.app.post('/command', async (req, res) => {
+            const command = req.body as McpCommand;
             if (!command || !command.type) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'Invalid command format. "type" field is required.'
-                } as McpResponse);
+                return res.status(400).json({ status: 'error', message: 'Invalid command format.' });
             }
-
             try {
-                // CommandHandlerに処理を委譲
                 const response = await this.commandHandler.handleCommand(command);
-                res.json(response); // 応答をLLMに返す
+                res.status(response.status === 'success' ? 200 : 500).json(response);
             } catch (error: any) {
-                console.error('Error in API route /command:', error);
-                res.status(500).json({
-                    status: 'error',
-                    message: `Internal server error: ${error.message || 'Unknown error'}`,
-                    details: error
-                } as McpResponse);
+                res.status(500).json({ status: 'error', message: 'An unexpected error occurred.', details: error.message });
             }
-        });
-
-        // ヘルスチェックエンドポイント
-        this.app.get('/health', (req: Request, res: Response) => {
-            res.json({ status: 'ok', message: 'MCP API is running.' });
         });
     }
 
-    /**
-     * APIサーバーを起動します。
-     */
     public start(): void {
         this.app.listen(this.port, () => {
-            console.log(`MCP API server listening on http://localhost:${this.port}`);
+            console.log(`MCP API server started.`);
+            // MCPサーバーが標準出力にメッセージを出すとmcpoがそれを検知してハングすることがあるため、起動後のメッセージはコメントアウトまたは削除します。
+            // console.log(`MCP API server listening on http://localhost:${this.port}`);
         });
     }
 }
