@@ -1,3 +1,8 @@
+########################################
+# Docker build
+########################################
+#time sudo docker build --progress plain -t naisy/pc-node22-slim-minecraft-mcp-dev -f Dockerfile_pc_node22_slim_minecraft_mcp_dev .
+
 #ベースイメージ
 FROM node:22-slim
 
@@ -26,3 +31,16 @@ EXPOSE 3000
 
 # コンテナ起動時に実行するコマンド
 CMD [ "npm", "start" ]
+
+
+# 必要なパッケージをインストール（vim, tree）
+RUN apt update && \
+    apt install -y git vim tree && \
+    rm -rf /var/lib/apt/lists/*
+
+# .vimrc をホームディレクトリに作成
+RUN echo "set mouse=" > /root/.vimrc && \
+    echo "set encoding=utf-8" >> /root/.vimrc && \
+    echo "set fileencodings=utf-8,euc-jp,sjis" >> /root/.vimrc && \
+    echo "set fileformats=unix,dos,mac" >> /root/.vimrc
+
