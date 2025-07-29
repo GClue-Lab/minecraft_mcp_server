@@ -1,73 +1,105 @@
-// src/main.ts v1.3
+// src/main.ts v7.0 (最終完成版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
 import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
-import { McpApi } from './api/mcpApi';
 import * as mineflayer from 'mineflayer';
+import { McpCommand } from './types/mcp';
+import { createInterface } from 'node:readline/promises';
 
-// 環境変数を読み込む
-const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
-const MINECRAFT_SERVER_PORT = parseInt(process.env.MINECRAFT_SERVER_PORT || '25565', 10);
-const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_CLI_Bot';
-const MCP_SERVER_PORT = parseInt(process.env.MCP_SERVER_PORT || '3000', 10);
+if (process.env.STDIO_MODE === 'true') {
+    console.log = () => {};
+    console.warn = () => {};
+    console.info = () => {};
+    console.debug = () => {};
+    console.error = () => {};
+}
 
-// --- ここを修正: minecraft-protocol のデバッグログを有効にする ---
-// NODE_DEBUG 環境変数で複数のデバッグネームスペースを指定できる
-// 例: NODE_DEBUG=mineflayer-pathfinder,minecraft-protocol npm start
-console.log('minecraft-protocol debug logging will be controlled by NODE_DEBUG environment variable (e.g., NODE_DEBUG=minecraft-protocol).');
-// --- 修正終わり ---
+const BOT_TOOLS_SCHEMA = [
+  { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
+  { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
+  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string", "description": "採掘するブロックの英語名 (例: oak_log, stone)" }, "quantity": { "type": "integer", "description": "採掘する数量" } }, "required": ["blockName", "quantity"] } },
+  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "追従を開始する場合は'on', 停止する場合は'off'を指定。" }, "targetPlayer": { "type": "string", "description": "追従を開始する場合に必須の、ターゲットプレイヤー名。" } }, "required": ["mode"] } },
+  { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "戦闘モードを有効にする（オンにする、警戒モードにする）場合は'on', 無効にする場合は'off'を指定。" } }, "required": ["mode"] } }
+];
 
-let commandHandler: CommandHandler;
-let mcpApi: McpApi;
-let worldKnowledge: WorldKnowledge | null = null;
-let behaviorEngine: BehaviorEngine | null = null;
-let botManagerInstance: BotManager;
+function sendResponse(responseObject: any) {
+    process.stdout.write(JSON.stringify(responseObject) + '\n');
+}
 
-async function startMcpServer() {
-    console.log('--- Starting Minecraft MCP Server ---');
-    console.log(`Targeting Minecraft Server: ${MINECRAFT_SERVER_HOST}:${MINECRAFT_SERVER_PORT}`);
-    console.log(`Bot Username: ${BOT_USERNAME}`);
-    console.log(`MCP API will listen on port: ${MCP_SERVER_PORT}`);
+async function main() {
+    const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
+    const MINECRAFT_SERVER_PORT = parseInt(process.env.MINECRAFT_SERVER_PORT || '25565', 10);
+    const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
-    try {
-        botManagerInstance = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
+    const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
+    const commandHandler = new CommandHandler(botManager, null, null);
 
-        commandHandler = new CommandHandler(botManagerInstance, null, null); 
-        mcpApi = new McpApi(commandHandler, MCP_SERVER_PORT);
-        mcpApi.start();
-        console.log('MCP API server started.');
-
-        botManagerInstance.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
-            if (worldKnowledge && behaviorEngine) {
-                console.log('Bot spawned again. Core services already initialized. Skipping re-initialization.');
-                worldKnowledge.setBotInstance(bot);
-                behaviorEngine.setBotInstance(bot);
-                return;
-            }
-
-            console.log('Bot spawned. Initializing WorldKnowledge and BehaviorEngine...');
-
+    botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
+        let worldKnowledge = commandHandler.getWorldKnowledge();
+        let behaviorEngine = commandHandler.getBehaviorEngine();
+        if (!worldKnowledge || !behaviorEngine) {
             worldKnowledge = new WorldKnowledge(bot);
-            behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManagerInstance); 
-            
+            behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
             commandHandler.setWorldKnowledge(worldKnowledge);
             commandHandler.setBehaviorEngine(behaviorEngine);
+        } else {
+            worldKnowledge.setBotInstance(bot);
+            behaviorEngine.setBotInstance(bot);
+        }
+    });
 
-            console.log('WorldKnowledge and BehaviorEngine initialized and linked to CommandHandler.');
-        });
+    botManager.connect().catch(err => { /* 静音モードでは何もしない */ });
 
-        botManagerInstance.connect().catch(err => {
-            console.error("Initial bot connection failed but server will continue to run and retry:", err.message);
-        });
+    const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
-        console.log('MCP Server initialization complete. Bot connection initiated.');
+    for await (const line of rl) {
+        try {
+            const request = JSON.parse(line);
 
-    } catch (error) {
-        console.error('Failed to start MCP Server:', error);
-        process.exit(1);
+            if (request.jsonrpc === '2.0' && request.method) {
+                if (request.method === 'initialize') {
+                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {}, protocolVersion: request.params.protocolVersion, serverInfo: { name: "my-minecraft-bot", version: "1.0.0" } } });
+                    continue;
+                }
+                if (request.method === 'notifications/initialized') { continue; }
+                if (request.method === 'tools/list') {
+                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
+                    continue;
+                }
+                // --- ここが修正部分 ---
+                if (request.method === 'tools/call') { // "tools/execute" から "tools/call" に変更
+                    while (!commandHandler.isReady()) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                    
+                    const toolName = request.params.name; // "tool" から "name" に変更
+                    const args = request.params.arguments; // "args" から "arguments" に変更
+                    let command: McpCommand | null = null;
+
+                    switch (toolName) {
+                        case 'minecraft_get_status':
+                            command = { type: 'getStatus', id: request.id }; break;
+                        case 'minecraft_stop_behavior':
+                            command = { type: 'stop', id: request.id }; break;
+                        case 'minecraft_set_mining_mode':
+                            command = { type: 'setMiningMode', mode: 'on', ...args, id: request.id }; break;
+                        case 'minecraft_set_follow_mode':
+                            command = { type: 'setFollowMode', ...args, id: request.id }; break;
+                        case 'minecraft_set_combat_mode':
+                            command = { type: 'setCombatMode', ...args, id: request.id }; break;
+                    }
+                    
+                    if (command) {
+                        const response = await commandHandler.handleCommand(command);
+                        sendResponse(response);
+                    }
+                    continue;
+                }
+            }
+        } catch (e) { /* 無視 */ }
     }
 }
 
-startMcpServer();
+main();

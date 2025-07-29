@@ -1,5 +1,3 @@
-// src/api/mcpApi.ts v1.5 (最終修正版)
-
 import express from 'express';
 import bodyParser from 'body-parser';
 import { CommandHandler } from '../services/CommandHandler';
@@ -24,33 +22,10 @@ export class McpApi {
     }
 
     private configureRoutes(): void {
-        /**
-         * GET /
-         * mcpoからのヘルスチェック及びSSE接続要求に応答するためのエンドポイント
-         */
         this.app.get('/', (req, res) => {
-            // SSEの接続要求に対して、正しいヘッダーを返すように修正
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-            });
-            res.flushHeaders();
-
-            // 接続が確立したことを示すためのコメント行を送信
-            res.write(': sse connection established\n\n');
-
-            // クライアントが接続を切断した際の処理
-            req.on('close', () => {
-                console.log('Client closed SSE connection.');
-                res.end();
-            });
+            res.status(200).json({ status: 'ok', message: 'Minecraft MCP Server is running.' });
         });
 
-        /**
-         * POST /command
-         * MCPコマンドを受け取り、CommandHandlerに渡すメインのエンドポイント
-         */
         this.app.post('/command', async (req, res) => {
             const command = req.body as McpCommand;
             if (!command || !command.type) {

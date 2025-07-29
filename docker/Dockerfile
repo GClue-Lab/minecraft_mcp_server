@@ -36,9 +36,9 @@ CMD [ "npm", "start" ]
 
 
 # 必要なパッケージをインストール（vim, tree）
-RUN apt update && \
-    apt install -y git vim tree && \
-    rm -rf /var/lib/apt/lists/*
+#RUN apt update && \
+#    apt install -y git vim tree && \
+#    rm -rf /var/lib/apt/lists/*
 
 # .vimrc をホームディレクトリに作成
 RUN echo "set mouse=" > /root/.vimrc && \

@@ -46,6 +46,18 @@ export class CommandHandler {
         console.log('CommandHandler initialized.');
     }
 
+    public isReady(): boolean {
+        return !!this.worldKnowledge && !!this.behaviorEngine;
+    }
+
+    public getWorldKnowledge(): WorldKnowledge | null {
+        return this.worldKnowledge;
+    }
+
+    public getBehaviorEngine(): BehaviorEngine | null {
+        return this.behaviorEngine;
+    }
+
     public setWorldKnowledge(wk: WorldKnowledge): void {
         this.worldKnowledge = wk;
     }
