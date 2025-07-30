@@ -12,17 +12,23 @@ curl -X POST -H "Content-Type: application/json" \
 
 周辺状況の確認
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{ "type": "getStatus", "id": "test-status-123" }' \
-     http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_get_status' \
+  -H 'accept: application/json' \
+  -d ''
 ```
 
 
 プレイヤーを追従する
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{"type": "setFollowMode", "mode": "on", "targetPlayer": "naisy714"}' \
-     http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_set_follow_mode' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "mode": "on",
+  "targetPlayer": "naisy714"
+}'
 ```
 
 プレイヤーの追従を解除する
@@ -36,12 +42,21 @@ curl -X POST -H "Content-Type: application/json" \
 ゾンビ警戒モードをONにする
 * プレイヤーを追従中に警戒モードがONでゾンビが現れたら、自動的にゾンビ退治が割り込み、倒し終えたら追従に戻ります。
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"type": "setCombatMode", "mode": "on"}' http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_set_combat_mode' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{"mode": "on"}'
 ```
 
 ゾンビ警戒モードをOFFにする
 ```
-curl -X POST -H "Content-Type: application/json" -d '{"type": "setCombatMode", "mode": "off"}' http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_set_combat_mode' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{"mode": "on"}'
+
 ```
 
 石を10個採掘する
@@ -60,23 +75,28 @@ curl -X POST -H "Content-Type: application/json" \
 
 赤いキノコを採取する
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{"type": "setMiningMode", "mode": "on", "blockName": "red_mushroom", "quantity": 5}' \
-     http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_set_mining_mode' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{"blockName": "red_mushroom", "quantity": 1}'
 ```
 
 茶色いキノコを採取する
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{"type": "setMiningMode", "mode": "on", "blockName": "brown_mushroom", "quantity": 5}' \
-     http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_set_mining_mode' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{"blockName": "brown_mushroom", "quantity": 1}'
 ```
 
 採掘をやめる
 ```
-curl -X POST -H "Content-Type: application/json" \
-     -d '{"type": "setMiningMode", "mode": "off"}' \
-     http://192.168.1.25:3000/command
+curl -X 'POST' \
+  'http://192.168.1.45:8000/minecraft-mcp/minecraft_stop_behavior' \
+  -H 'accept: application/json' \
+  -d ''
 ```
 
 

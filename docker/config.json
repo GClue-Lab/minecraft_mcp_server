@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "minecraft-mcp": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm", "--add-host=host.docker.internal:host-gateway",
+        "-e", "MINECRAFT_SERVER_HOST=host.docker.internal",
+        "-e", "MINECRAFT_SERVER_PORT=25565",
+        "-e", "BOT_USERNAME=MyAIBot",
+        "-e", "STDIO_MODE=true",
+        "my-minecraft-bot"
+      ]
+    }
+  }
+}

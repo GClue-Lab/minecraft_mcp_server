@@ -129,7 +129,7 @@ export class FollowPlayerBehavior {
         const targetPlayer = this.worldKnowledge.getPlayer(this.options.targetPlayer);
         const botEntity = this.worldKnowledge.getBotEntity();
 
-        if (!botEntity || !botEntity.position) {
+        if (!botEntity || !botEntity.position || !this.bot.entity || ! this.bot.entity.position) {
             console.warn(`[FollowPlayerBehavior.executeFollowLogic] Bot entity information not available. Stopping.`);
             this.stop();
             return;
@@ -144,16 +144,22 @@ export class FollowPlayerBehavior {
 
         if (distance <= this.options.distanceThreshold) {
             console.log(`[FollowPlayerBehavior.executeFollowLogic] Bot is close enough to ${this.options.targetPlayer} (${distance.toFixed(2)} blocks). Staying put.`);
-            this.bot.clearControlStates(); // 移動制御をクリアして停止
-            this.bot.lookAt(targetPlayer.position.offset(0, targetPlayer.health ? targetPlayer.health / 2 : 1.6, 0), true); // プレイヤーの方向を向く
+            try {
+                this.bot.clearControlStates(); // 移動制御をクリアして停止
+                this.bot.lookAt(targetPlayer.position.offset(0, targetPlayer.health ? targetPlayer.health / 2 : 1.6, 0), true); // プレイヤーの方向を向く
+            } catch (err) {
+                console.warn(`[FollowPlayerBehavior] Failed to lookAt: ${err}`);
+            }
         } else {
             console.log(`[FollowPlayerBehavior.executeFollowLogic] Moving towards ${this.options.targetPlayer} at (${targetPlayer.position.x.toFixed(2)}, ${targetPlayer.position.y.toFixed(2)}, ${targetPlayer.position.z.toFixed(2)}) (Distance: ${distance.toFixed(2)}).`);
-            
-            this.bot.lookAt(targetPlayer.position.offset(0, targetPlayer.health ? targetPlayer.health / 2 : 1.6, 0), true); // プレイヤーの方向を向く
-            this.bot.setControlState('forward', true); // 前に進む
-            this.bot.setControlState('jump', this.bot.entity.onGround && distance > 3 && targetPlayer.position.y > botEntity.position.y + 0.5); // プレイヤーより高ければジャンプを試みる簡易ロジック
-            
-            console.log(`[FollowPlayerBehavior.executeFollowLogic] Bot is attempting to move with basic controls.`);
+            try {
+                this.bot.lookAt(targetPlayer.position.offset(0, targetPlayer.health ? targetPlayer.health / 2 : 1.6, 0), true); // プレイヤーの方向を向く
+                this.bot.setControlState('forward', true); // 前に進む
+                this.bot.setControlState('jump', this.bot.entity.onGround && distance > 3 && targetPlayer.position.y > botEntity.position.y + 0.5); // プレイヤーより高ければジャンプを試みる簡易ロジック
+                console.log(`[FollowPlayerBehavior.executeFollowLogic] Bot is attempting to move with basic controls.`);
+            } catch (err) {
+                console.warn(`[FollowPlayerBehavior] Failed to lookAt: ${err}`);
+            }
         }
     }
 }

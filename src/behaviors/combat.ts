@@ -138,7 +138,7 @@ export class CombatBehavior {
 
             if (!this.currentTargetEntityId) continue;
             targetMob = this.worldKnowledge.getEntityById(this.currentTargetEntityId!);
-            if (!targetMob || !targetMob.isValid || this.bot.entity.position.distanceTo(targetMob.position) > this.options.maxCombatDistance) {
+            if (!targetMob || !targetMob.isValid || !this.bot.entity || !this.bot.entity.position || this.bot.entity.position.distanceTo(targetMob.position) > this.options.maxCombatDistance) {
                 this.currentTargetEntityId = null;
                 continue;
             }
