@@ -1,4 +1,4 @@
-// src/main.ts v7.0 (最終完成版)
+// src/main.ts (最終完成版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -68,14 +68,13 @@ async function main() {
                     sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
                     continue;
                 }
-                // --- ここが修正部分 ---
-                if (request.method === 'tools/call') { // "tools/execute" から "tools/call" に変更
+                if (request.method === 'tools/call') {
                     while (!commandHandler.isReady()) {
                         await new Promise(resolve => setTimeout(resolve, 200));
                     }
                     
-                    const toolName = request.params.name; // "tool" から "name" に変更
-                    const args = request.params.arguments; // "args" から "arguments" に変更
+                    const toolName = request.params.name;
+                    const args = request.params.arguments;
                     let command: McpCommand | null = null;
 
                     switch (toolName) {
@@ -92,8 +91,23 @@ async function main() {
                     }
                     
                     if (command) {
-                        const response = await commandHandler.handleCommand(command);
-                        sendResponse(response);
+                        try {
+                            const result = await commandHandler.handleCommand(command);
+                            // mcpoが期待する{"content": "..."}という形式で応答を組み立てる
+                            const resultString = typeof result === 'string' ? result : JSON.stringify(result);
+                            sendResponse({
+                                jsonrpc: '2.0',
+                                id: request.id,
+                                result: {
+                                    content: [{
+                                        type: "text",
+                                        text: resultString
+                                    }]
+                                }
+                            });
+                        } catch (error: any) {
+                            sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
+                        }
                     }
                     continue;
                 }

@@ -194,4 +194,9 @@ export class WorldKnowledge {
         });
         return block;
     }
+
+    public findPlayer(username: string): WorldEntity | undefined {
+        if (!username) return undefined;
+        return this.getAllEntities().find(e => e.type === 'player' && e.name === username);
+    }
 }
