@@ -1,4 +1,4 @@
-// src/main.ts (初期化シーケンス解説付き)
+// src/main.ts (ログ完全抑制版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -10,19 +10,25 @@ import * as mineflayer from 'mineflayer';
 import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
 
-// (ログ抑制処理は変更なし)
-if (process.env.STDIO_MODE === 'true') { /* ... */ }
+// ===== ★ここを修正：console.errorも抑制する★ =====
+if (process.env.STDIO_MODE === 'true') {
+    console.log = () => {};
+    console.warn = () => {};
+    console.info = () => {};
+    console.debug = () => {};
+    console.error = () => {}; // この行を追加
+}
+// ===== ★ここまで修正★ =====
 
-// ボットの能力を定義する「ツールカタログ」
+// (BOT_TOOLS_SCHEMAは変更なし)
 const BOT_TOOLS_SCHEMA = [
   { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
   { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
   { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string" }, "quantity": { "type": "integer" } }, "required": ["blockName", "quantity"] } },
-  { "name": "minecraft_set_follow_mode", "description": "ボ.tsに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] }, "targetPlayer": { "type": "string" } }, "required": ["mode"] } },
+  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] }, "targetPlayer": { "type": "string" } }, "required": ["mode"] } },
   { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] } }, "required": ["mode"] } }
 ];
 
-// mcpoへ応答を送信する唯一の関数
 function sendResponse(responseObject: any) {
     process.stdout.write(JSON.stringify(responseObject) + '\n');
 }
@@ -35,7 +41,6 @@ async function main() {
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
     const commandHandler = new CommandHandler(botManager, null, null, null);
 
-    // ボットの準備が整ったら、各種Managerを初期化してCommandHandlerに渡す
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
@@ -50,7 +55,6 @@ async function main() {
 
     botManager.connect().catch(err => { /* 静音モード */ });
 
-    // 標準入力を一行ずつ非同期に読み取るループ
     const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
     for await (const line of rl) {
         try {
@@ -58,11 +62,8 @@ async function main() {
 
             if (request.jsonrpc === '2.0' && request.method) {
                 
-                // ===== ここからが初期化シーケンス（受付・挨拶） =====
-
-                // ステップ1: mcpoからの「はじめまして」に応答する
+                // --- 初期化シーケンス ---
                 if (request.method === 'initialize') {
-                    console.error("Received initialize request."); // デバッグ用に標準エラー出力へ
                     sendResponse({
                         jsonrpc: '2.0',
                         id: request.id,
@@ -72,40 +73,26 @@ async function main() {
                             serverInfo: { name: "my-minecraft-bot", version: "2.0.0" }
                         }
                     });
-                    continue; // 挨拶が終わったので、次のリクエストを待つ
+                    continue;
                 }
-
-                // ステップ2: mcpoからの「挨拶ありがとう」は無視する
                 if (request.method === 'notifications/initialized') {
-                    console.error("Received initialized notification.");
-                    continue; // 応答不要なので、次のリクエストを待つ
+                    continue;
                 }
-
-                // ステップ3: mcpoからの「何ができますか？」にツールカタログを渡す
                 if (request.method === 'tools/list') {
-                    console.error("Received tools/list request.");
                     sendResponse({
                         jsonrpc: '2.0',
                         id: request.id,
                         result: { tools: BOT_TOOLS_SCHEMA }
                     });
-                    continue; // カタログを渡したので、次のリクエストを待つ
+                    continue;
                 }
                 
-                // ===== ここまでが初期化シーケンス =====
-
-
-                // ===== ここからが通常業務（仕事の依頼） =====
-                // 初期化シーケンス以外のリクエスト（tools/call）が来たら、初めてCommandHandlerを呼び出す
+                // --- 通常業務 ---
                 if (request.method === 'tools/call') {
-                    console.error(`Received tools/call: ${request.params.name}`);
-                    
-                    // ボットの準備ができるまで待機
                     while (!commandHandler.isReady()) {
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
                     
-                    // tool名を古いMcpCommand形式に変換
                     const toolName = request.params.name;
                     const args = request.params.arguments;
                     let command: McpCommand | null = null;
@@ -119,7 +106,6 @@ async function main() {
                     
                     if (command) {
                         try {
-                            // CommandHandlerに実際の処理を依頼
                             const result = await commandHandler.handleCommand(command);
                             const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
                             sendResponse({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: "text", text: resultString }] } });
@@ -127,7 +113,7 @@ async function main() {
                             sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
                         }
                     }
-                    continue; // 業務完了
+                    continue;
                 }
             }
         } catch (e) { /* JSONパース失敗などは無視 */ }
