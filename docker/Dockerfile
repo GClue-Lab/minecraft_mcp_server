@@ -30,7 +30,7 @@ RUN apt-get update && \
 COPY patches/mineflayer-physics-safe.patch /tmp/physics.patch
 
 # mineflayerのパッチ適用
-RUN patch -p1 -d node_modules/mineflayer < /tmp/physics.patch
+RUN patch -p0 -d node_modules/mineflayer < /tmp/physics.patch
 
 
 # 必要なソースコードと設定ファイルをコピー
