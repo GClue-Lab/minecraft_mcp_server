@@ -44,7 +44,8 @@ RUN npm run build # package.jsonに "build": "tsc" が必要
 EXPOSE 3000
 
 # コンテナ起動時に実行するコマンド
-CMD [ "npm", "start" ]
+#CMD [ "npm", "start" ]
+CMD [ "node", "dist/index.js" ]
 
 # 必要なパッケージをインストール（vim, tree）
 #RUN apt update && \
