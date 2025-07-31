@@ -1,4 +1,4 @@
-// src/services/TaskManager.ts (高機能版)
+// src/services/TaskManager.ts (ヘルパーメソッド追加版)
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
@@ -25,7 +25,6 @@ export class TaskManager {
         this.modeManager = modeManager;
         console.log('TaskManager (Advanced) initialized.');
 
-        // ★ここを修正: イベントリスナーの引数に型を追加
         this.behaviorEngine.on('taskCompleted', (task: Task | null, result: any) => this.onTaskFinished(task));
         this.behaviorEngine.on('taskFailed', (task: Task | null, reason: any) => this.onTaskFinished(task));
     }
@@ -44,7 +43,11 @@ export class TaskManager {
         
         if (this.activeTask && newTask.priority < this.activeTask.priority) {
             console.log(`[TaskManager] INTERRUPT: New task has higher priority. Stopping current task.`);
-            this.taskQueue.unshift(this.activeTask);
+            if (this.activeTask.taskId.startsWith('default-')) {
+                // デフォルトタスクはキューに戻さない
+            } else {
+                this.taskQueue.unshift(this.activeTask);
+            }
             this.behaviorEngine.stopCurrentBehavior();
         }
         
@@ -71,6 +74,16 @@ export class TaskManager {
             this.behaviorEngine.executeTask(this.activeTask);
             return;
         }
+        
+        this.startDefaultBehavior();
+    }
+
+    /**
+     * ★追加★ デフォルト行動を開始する
+     * CommandHandlerからモードが変更されたときに呼び出される
+     */
+    public startDefaultBehavior(): void {
+        if (this.activeTask) return; // 何か実行中なら何もしない
 
         if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
             const followTask: Task = {
@@ -90,6 +103,16 @@ export class TaskManager {
     public stopCurrentTask(): void {
         if (this.activeTask) {
             this.behaviorEngine.stopCurrentBehavior();
+        }
+    }
+
+    /**
+     * ★追加★ 現在のタスクが指定されたタイプの場合のみ停止する
+     * @param type 停止対象のタスクタイプ
+     */
+    public stopCurrentTaskIfItIs(type: Task['type']): void {
+        if (this.activeTask && this.activeTask.type === type) {
+            this.stopCurrentTask();
         }
     }
 
