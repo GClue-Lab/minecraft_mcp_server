@@ -1,14 +1,23 @@
-// src/main.ts (修正版)
+// src/main.ts (ログ抑制機能付き)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
 import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
-import { TaskManager } from './services/TaskManager'; // ===== 追加 =====
+import { TaskManager } from './services/TaskManager';
 import * as mineflayer from 'mineflayer';
 import { createInterface } from 'node:readline/promises';
 
-// ===== ここからツール定義を新しい設計に合わせて変更 =====
+// ===== ★ここから追加：mcpo連携のためのログ抑制処理★ =====
+if (process.env.STDIO_MODE === 'true') {
+    console.log = () => {};
+    console.warn = () => {};
+    console.info = () => {};
+    console.debug = () => {};
+    console.error = () => {};
+}
+// ===== ★ここまで追加★ =====
+
 const BOT_TOOLS_SCHEMA = [
   {
     "name": "get_full_status",
@@ -41,8 +50,6 @@ const BOT_TOOLS_SCHEMA = [
     "description": "現在のタスクキューの内容を一覧で取得する。"
   }
 ];
-// ===== ここまでツール定義の変更 =====
-
 
 function sendResponse(responseObject: any) {
     process.stdout.write(JSON.stringify(responseObject) + '\n');
@@ -55,26 +62,20 @@ async function main() {
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
     
-    // ===== ここからインスタンス化のロジックを変更 =====
-    // CommandHandlerはまだTaskManagerを知らないので、nullで初期化
     const commandHandler = new CommandHandler(botManager, null);
 
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
-        // CommandHandlerが既にすべてのインスタンスを持っているかチェック
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
-            const taskManager = new TaskManager(behaviorEngine); // TaskManagerをインスタンス化
+            const taskManager = new TaskManager(behaviorEngine);
             
-            // CommandHandlerに必要なインスタンスをすべて設定
             commandHandler.setDependencies(worldKnowledge, behaviorEngine, taskManager);
         } else {
-            // 既存のインスタンスに新しいbotインスタンスを設定
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);
             commandHandler.getBehaviorEngine()?.setBotInstance(bot);
         }
     });
-    // ===== ここまでインスタンス化のロジックの変更 =====
 
     botManager.connect().catch(err => { /* 静音モードでは何もしない */ });
 
@@ -97,7 +98,6 @@ async function main() {
                     }
                     
                     try {
-                        // コマンド処理をCommandHandlerに完全に委譲
                         const result = await commandHandler.handleToolCall(request.params.name, request.params.arguments);
                         
                         const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
@@ -117,4 +117,3 @@ async function main() {
 }
 
 main();
-
