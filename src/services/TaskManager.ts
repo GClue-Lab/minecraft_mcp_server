@@ -1,77 +1,112 @@
-// src/services/TaskManager.ts (連携機能付き)
+// src/services/TaskManager.ts (高機能版)
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
+import { ModeManager } from './ModeManager'; // ModeManagerをインポート
 import { randomUUID } from 'crypto';
+
+// タスクのデフォルト優先度を定義
+const TASK_PRIORITIES: { [key in Task['type']]: number } = {
+    'combat': 0,
+    'mine': 5,
+    'goto': 8,
+    'follow': 10,
+    'dropItems': 12,
+    'patrol': 15,
+};
 
 export class TaskManager {
     private taskQueue: Task[] = [];
     private behaviorEngine: BehaviorEngine;
-    private isEngineBusy: boolean = false;
+    private modeManager: ModeManager; // ModeManagerへの参照を持つ
+    private activeTask: Task | null = null;
 
-    constructor(behaviorEngine: BehaviorEngine) {
+    constructor(behaviorEngine: BehaviorEngine, modeManager: ModeManager) {
         this.behaviorEngine = behaviorEngine;
-        console.log('TaskManager initialized.');
+        this.modeManager = modeManager; // インスタンスを保持
+        console.log('TaskManager (Advanced) initialized.');
 
-        // BehaviorEngineからのイベントをリッスンする
-        this.behaviorEngine.on('taskCompleted', (task, result) => {
-            console.log(`[TaskManager] Received taskCompleted for ID: ${task.taskId}`);
-            this.isEngineBusy = false;
-            this.tick(); // 次のタスクへ
-        });
-
-        this.behaviorEngine.on('taskFailed', (task, reason) => {
-            console.error(`[TaskManager] Received taskFailed for ID: ${task.taskId}. Reason: ${reason}`);
-            this.isEngineBusy = false;
-            this.tick(); // 次のタスクへ
-        });
+        this.behaviorEngine.on('taskCompleted', (task, result) => this.onTaskFinished(task));
+        this.behaviorEngine.on('taskFailed', (task, reason) => this.onTaskFinished(task));
     }
 
-    public addTask(type: Task['type'], args: any, priority: number = 10): string {
+    public addTask(type: Task['type'], args: any, priority?: number): string {
         const newTask: Task = {
             taskId: randomUUID(),
             type: type,
             arguments: args,
             status: 'pending',
-            priority: priority,
+            priority: priority ?? TASK_PRIORITIES[type] ?? 99,
             createdAt: Date.now(),
         };
-
+        
+        console.log(`[TaskManager] New task received: ${type} (Priority: ${newTask.priority})`);
+        
+        // ★割り込み処理★
+        // 新しいタスクが現在実行中のタスクより優先度が高いか？
+        if (this.activeTask && newTask.priority < this.activeTask.priority) {
+            console.log(`[TaskManager] INTERRUPT: New task has higher priority. Stopping current task.`);
+            // 現在のタスクをキューの先頭に戻して後で再試行させる
+            this.taskQueue.unshift(this.activeTask);
+            this.behaviorEngine.stopCurrentBehavior(); // これが完了すると onTaskFinished が呼ばれ、tickが走る
+        }
+        
         this.taskQueue.push(newTask);
         this.taskQueue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
         
-        console.log(`[TaskManager] New task added to queue: ${type} (ID: ${newTask.taskId})`);
         this.tick();
         return newTask.taskId;
     }
     
-    public stopCurrentTask(): void {
-        this.behaviorEngine.stopCurrentBehavior();
+    private onTaskFinished(task: Task | null) {
+        console.log(`[TaskManager] Task finished: ${task?.taskId}`);
+        this.activeTask = null;
+        this.tick();
     }
 
     private tick(): void {
-        if (this.isEngineBusy || this.taskQueue.length === 0) {
+        // 実行中のタスクがある場合は何もしない
+        if (this.activeTask) {
             return;
         }
 
-        this.isEngineBusy = true;
-        const nextTask = this.taskQueue.shift()!;
-        nextTask.status = 'running';
-        
-        console.log(`[TaskManager] Sending task to BehaviorEngine: ${nextTask.type} (ID: ${nextTask.taskId})`);
-        const success = this.behaviorEngine.executeTask(nextTask);
-        if (!success) {
-            // もしBehaviorEngineがタスクの開始自体に失敗したら、すぐに次のtickを試みる
-            this.isEngineBusy = false;
-            this.tick();
+        // 実行すべきタスクがキューにあれば実行
+        if (this.taskQueue.length > 0) {
+            this.activeTask = this.taskQueue.shift()!;
+            this.activeTask.status = 'running';
+            console.log(`[TaskManager] Executing next task from queue: ${this.activeTask.type}`);
+            this.behaviorEngine.executeTask(this.activeTask);
+            return;
+        }
+
+        // ★デフォルト行動の決定★
+        // キューが空の場合、モード設定に基づいて行動する
+        if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+            const followTask: Task = {
+                taskId: 'default-follow',
+                type: 'follow',
+                arguments: { targetPlayer: this.modeManager.getFollowTarget() },
+                status: 'running',
+                priority: TASK_PRIORITIES.follow,
+                createdAt: Date.now()
+            };
+            this.activeTask = followTask;
+            console.log(`[TaskManager] Queue is empty. Starting default behavior: Follow`);
+            this.behaviorEngine.executeTask(this.activeTask);
+        }
+        // TODO: 警戒モードがONなら、周囲を索敵する 'patrol' タスクをデフォルトにするなどのロジックを追加
+    }
+    
+    public stopCurrentTask(): void {
+        if (this.activeTask) {
+            this.behaviorEngine.stopCurrentBehavior();
         }
     }
 
     public getStatus() {
         return {
-            isEngineBusy: this.isEngineBusy,
-            activeTask: this.behaviorEngine.getActiveTask(),
-            queue: this.taskQueue,
+            activeTask: this.activeTask,
+            taskQueue: this.taskQueue.map(t => ({ id: t.taskId, type: t.type, priority: t.priority})),
         };
     }
 }

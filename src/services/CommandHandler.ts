@@ -1,89 +1,91 @@
-// src/services/CommandHandler.ts (最終修正版)
+// src/services/CommandHandler.ts (状況報告強化版)
 
-import { McpCommand, Task } from '../types/mcp';
+import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
 import { WorldKnowledge } from './WorldKnowledge';
-import { TaskManager } from './TaskManager'; // BehaviorEngineの代わりにTaskManagerをインポート
+import { TaskManager } from './TaskManager';
+import { ModeManager } from './ModeManager'; // ModeManagerをインポート
 
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
     private taskManager: TaskManager | null = null;
+    private modeManager: ModeManager | null = null; // ModeManagerへの参照を持つ
 
-    // 依存関係を更新
-    constructor(botManager: BotManager, worldKnowledge: WorldKnowledge | null, taskManager: TaskManager | null) {
+    constructor(botManager: BotManager, worldKnowledge: WorldKnowledge | null, taskManager: TaskManager | null, modeManager: ModeManager | null) {
         this.botManager = botManager;
         this.worldKnowledge = worldKnowledge;
         this.taskManager = taskManager;
+        this.modeManager = modeManager;
     }
 
     public isReady(): boolean {
-        return !!this.worldKnowledge && !!this.taskManager;
+        return !!this.worldKnowledge && !!this.taskManager && !!this.modeManager;
     }
 
-    // 依存関係注入メソッドも更新
-    public setDependencies(worldKnowledge: WorldKnowledge, taskManager: TaskManager): void {
+    public setDependencies(worldKnowledge: WorldKnowledge, taskManager: TaskManager, modeManager: ModeManager): void {
         this.worldKnowledge = worldKnowledge;
         this.taskManager = taskManager;
+        this.modeManager = modeManager;
     }
 
     public getWorldKnowledge(): WorldKnowledge | null { return this.worldKnowledge; }
 
-    /**
-     * main.ts や mcpApi.ts から古い形式のコマンドを受け取り、処理する
-     * @param command McpCommand形式のコマンド
-     * @returns 処理結果
-     */
     public async handleCommand(command: McpCommand): Promise<any> {
-        if (!this.isReady() || !this.taskManager || !this.worldKnowledge) {
+        if (!this.isReady() || !this.taskManager || !this.modeManager || !this.worldKnowledge) {
             throw new Error("Bot is not fully ready or connected.");
         }
         
-        // McpCommandをTaskManagerへの命令に変換
         switch (command.type) {
             case 'setMiningMode':
-                const taskId = this.taskManager.addTask('mine', { 
+                return this.taskManager.addTask('mine', { 
                     blockName: command.blockName, 
                     quantity: command.quantity 
                 });
-                return `Mining task started with ID: ${taskId}`;
 
             case 'setFollowMode':
-                if (command.mode === 'on') {
-                    if (!command.targetPlayer) throw new Error("targetPlayer is required.");
-                    if (!this.worldKnowledge.findPlayer(command.targetPlayer)) {
-                        throw new Error(`Player '${command.targetPlayer}' not found.`);
-                    }
-                    const followTaskId = this.taskManager.addTask('follow', { 
-                        targetPlayer: command.targetPlayer 
-                    });
-                    return `Follow task started with ID: ${followTaskId}`;
-                } else {
-                    this.taskManager.stopCurrentTask();
-                    return "Stopped current task.";
-                }
+                this.modeManager.setFollowMode(command.mode === 'on', command.targetPlayer || null);
+                return `Follow mode is now ${command.mode}.`;
 
             case 'setCombatMode':
+                this.modeManager.setCombatMode(command.mode === 'on');
+                // 警戒モードONなら、高優先度の戦闘タスクを追加
                 if (command.mode === 'on') {
-                     const combatTaskId = this.taskManager.addTask('combat', {}, 0); // 優先度0
-                     return `Combat task started with ID: ${combatTaskId}`;
-                } else {
-                    this.taskManager.stopCurrentTask();
-                    return "Stopped current task.";
+                    this.taskManager.addTask('combat', {}, 0);
                 }
+                return `Combat mode is now ${command.mode}.`;
 
             case 'getStatus':
                 const bot = this.botManager.getBot()!;
-                return {
-                    status: this.taskManager.getStatus(),
-                    health: bot.health,
-                    food: bot.food,
-                    position: bot.entity.position
-                };
+                const modeStatus = this.modeManager.getStatus();
+                const taskStatus = this.taskManager.getStatus();
+                
+                // 状況を整形して返す
+                let report = `--- Bot Status Report ---\n`;
+                report += `[Bot Info]\n`;
+                report += `- Health: ${bot.health}\n- Food: ${bot.food}\n`;
+                report += `- Position: ${bot.entity.position.toString()}\n\n`;
+                
+                report += `[Modes]\n`;
+                report += `- Combat Mode: ${modeStatus.combatMode ? 'ON' : 'OFF'}\n`;
+                report += `- Follow Mode: ${modeStatus.followMode ? `ON (Target: ${modeStatus.followTarget})` : 'OFF'}\n\n`;
+
+                report += `[Tasks]\n`;
+                if (taskStatus.activeTask) {
+                    report += `- Active Task: ${taskStatus.activeTask.type} (ID: ${taskStatus.activeTask.taskId})\n`;
+                } else {
+                    report += `- Active Task: None (Idle or Default Behavior)\n`;
+                }
+                report += `- Queued Tasks: ${taskStatus.taskQueue.length}\n`;
+                taskStatus.taskQueue.forEach((t, i) => {
+                    report += `  ${i+1}. ${t.type} (Priority: ${t.priority})\n`;
+                });
+                
+                return report;
 
             case 'stop':
                 this.taskManager.stopCurrentTask();
-                return "All current actions have been stopped.";
+                return "Stopped current task.";
                 
             default:
                 throw new Error(`Unknown command type received: ${command.type}`);

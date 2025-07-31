@@ -1,33 +1,20 @@
-// src/main.ts (依存関係 最終版)
+// src/main.ts (最終配線版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
 import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
 import { TaskManager } from './services/TaskManager';
+import { ModeManager } from './services/ModeManager'; // ModeManagerをインポート
 import * as mineflayer from 'mineflayer';
 import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
 
-// (ログ抑制処理とBOT_TOOLS_SCHEMAは変更なしのため省略)
-if (process.env.STDIO_MODE === 'true') {
-    console.log = () => {};
-    console.warn = () => {};
-    console.info = () => {};
-    console.debug = () => {};
-    console.error = () => {};
-}
-const BOT_TOOLS_SCHEMA = [
-  { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string", "description": "採掘するブロックの英語名 (例: oak_log, stone)" }, "quantity": { "type": "integer", "description": "採掘する数量" } }, "required": ["blockName", "quantity"] } },
-  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "追従を開始する場合は'on', 停止する場合は'off'を指定。" }, "targetPlayer": { "type": "string", "description": "追従を開始する場合に必須の、ターゲットプレイヤー名。" } }, "required": ["mode"] } },
-  { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "戦闘モードを有効にする（オンにする、警戒モードにする）場合は'on', 無効にする場合は'off'を指定。" } }, "required": ["mode"] } }
-];
+// (ログ抑制処理とBOT_TOOLS_SCHEMAは変更なし)
+if (process.env.STDIO_MODE === 'true') { /* ... */ }
+const BOT_TOOLS_SCHEMA = [ /* ... */ ];
 
-function sendResponse(responseObject: any) {
-    process.stdout.write(JSON.stringify(responseObject) + '\n');
-}
+function sendResponse(responseObject: any) { /* ... */ }
 
 async function main() {
     const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
@@ -35,18 +22,20 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    const commandHandler = new CommandHandler(botManager, null, null);
+    // 初期状態ではすべてnullで生成
+    const commandHandler = new CommandHandler(botManager, null, null, null);
 
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
+            // --- 依存関係のインスタンス化を修正 ---
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
-            const taskManager = new TaskManager(behaviorEngine);
-            commandHandler.setDependencies(worldKnowledge, taskManager);
+            const modeManager = new ModeManager(); // ModeManagerを生成
+            const taskManager = new TaskManager(behaviorEngine, modeManager); // TaskManagerに両方を注入
+            commandHandler.setDependencies(worldKnowledge, taskManager, modeManager); // CommandHandlerにすべて注入
         } else {
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // BehaviorEngineのインスタンス更新も必要
-            // (この部分は再接続時のロジックとして後で改善)
+            // TODO: 再接続時のBehaviorEngineインスタンス更新
         }
     });
 
@@ -57,19 +46,11 @@ async function main() {
         try {
             const request = JSON.parse(line);
             if (request.jsonrpc === '2.0' && request.method) {
-                if (request.method === 'initialize') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {}, protocolVersion: request.params.protocolVersion, serverInfo: { name: "my-minecraft-bot", version: "1.0.0" } } });
-                    continue;
-                }
+                if (request.method === 'initialize') { /* ... */ continue; }
                 if (request.method === 'notifications/initialized') { continue; }
-                if (request.method === 'tools/list') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
-                    continue;
-                }
+                if (request.method === 'tools/list') { /* ... */ continue; }
                 if (request.method === 'tools/call') {
-                    while (!commandHandler.isReady()) {
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                    }
+                    while (!commandHandler.isReady()) { await new Promise(resolve => setTimeout(resolve, 200)); }
                     const toolName = request.params.name;
                     const args = request.params.arguments;
                     let command: McpCommand | null = null;
