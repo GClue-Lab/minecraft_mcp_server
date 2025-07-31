@@ -1,10 +1,11 @@
-// src/services/StatusManager.ts (新規作成)
+// src/services/StatusManager.ts (修正版)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
 import { BotStatus } from '../types/mcp';
 import { WorldKnowledge } from './WorldKnowledge';
 import { TaskManager } from './TaskManager';
+import { ModeManager } from './ModeManager'; // ModeManagerをインポート
 
 /**
  * ボットのあらゆる状態を一元的に集約・管理するクラス。
@@ -13,12 +14,15 @@ export class StatusManager {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private taskManager: TaskManager;
+    private modeManager: ModeManager; // ModeManagerへの参照を追加
     private homePosition: Vec3 | null = null;
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, taskManager: TaskManager) {
+    // ★ここを修正: コンストラクタにmodeManagerを追加
+    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, taskManager: TaskManager, modeManager: ModeManager) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.taskManager = taskManager;
+        this.modeManager = modeManager; // 参照を保持
     }
 
     public setHome(position: Vec3): void {
@@ -35,6 +39,7 @@ export class StatusManager {
      */
     public getFullStatus(): BotStatus {
         const activeTaskInfo = this.taskManager.getStatus().activeTask;
+        const modeStatus = this.modeManager.getStatus(); // ★ここを追加: ModeManagerから最新情報を取得
 
         return {
             health: this.bot.health,
@@ -51,12 +56,14 @@ export class StatusManager {
                     distance: parseFloat(e.position.distanceTo(this.bot.entity.position).toFixed(2))
                 }))
                 .sort((a, b) => a.distance - b.distance)
-                .slice(0, 10), // 上位10件に絞る
+                .slice(0, 10),
             currentTask: activeTaskInfo ? {
                 taskId: activeTaskInfo.taskId,
                 type: activeTaskInfo.type,
                 detail: JSON.stringify(activeTaskInfo.arguments)
-            } : null
+            } : null,
+            // ★ここを追加: ModeManagerから取得したモード情報をステータスに含める
+            modes: modeStatus
         };
     }
 
@@ -64,20 +71,11 @@ export class StatusManager {
         const equipment: { [key: string]: string | null } = {
             hand: null, head: null, torso: null, legs: null, feet: null
         };
-        // Mineflayer 4.xでは非同期APIに変更
-        // Promise.all([
-        //     this.bot.equipments(),
-        // ]).then(([equipped]) => {
-        //     if (equipped) {
-        //         equipment.hand = equipped.hand?.name || null;
-        //         // ...
-        //     }
-        // });
-        // 現時点では簡易的に同期APIを使用
         const handItem = this.bot.heldItem;
         if (handItem) {
             equipment.hand = handItem.name;
         }
+        // 他の部位の装備取得は、必要に応じて追加
         return equipment;
     }
 }

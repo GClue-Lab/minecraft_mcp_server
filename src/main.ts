@@ -38,7 +38,6 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    // ★ここを修正: 5つの引数で初期化
     const commandHandler = new CommandHandler(botManager, null, null, null, null);
 
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
@@ -46,10 +45,11 @@ async function main() {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
             const modeManager = new ModeManager();
-            const taskManager = new TaskManager(behaviorEngine, modeManager);
-            const statusManager = new StatusManager(bot, worldKnowledge, taskManager); // StatusManagerを生成
+            // ★ここを修正: TaskManagerにbotManagerを渡す
+            const taskManager = new TaskManager(behaviorEngine, modeManager, botManager);
+            // ★ここを修正: StatusManagerにmodeManagerを渡す
+            const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
             
-            // ★ここを修正: 4つの引数を渡す
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
         } else {
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);

@@ -1,8 +1,9 @@
-// src/services/TaskManager.ts (ヘルパーメソッド追加版)
+// src/services/TaskManager.ts (リスポーン対応版)
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
 import { ModeManager } from './ModeManager';
+import { BotManager } from './BotManager';
 import { randomUUID } from 'crypto';
 
 const TASK_PRIORITIES: { [key in Task['type']]: number } = {
@@ -18,15 +19,33 @@ export class TaskManager {
     private taskQueue: Task[] = [];
     private behaviorEngine: BehaviorEngine;
     private modeManager: ModeManager;
+    private botManager: BotManager;
     private activeTask: Task | null = null;
 
-    constructor(behaviorEngine: BehaviorEngine, modeManager: ModeManager) {
+    constructor(behaviorEngine: BehaviorEngine, modeManager: ModeManager, botManager: BotManager) {
         this.behaviorEngine = behaviorEngine;
         this.modeManager = modeManager;
-        console.log('TaskManager (Advanced) initialized.');
+        this.botManager = botManager;
+        console.log('TaskManager (Respawn-Aware) initialized.');
 
         this.behaviorEngine.on('taskCompleted', (task: Task | null, result: any) => this.onTaskFinished(task));
         this.behaviorEngine.on('taskFailed', (task: Task | null, reason: any) => this.onTaskFinished(task));
+
+        const eventEmitter = this.botManager.getBotInstanceEventEmitter();
+        eventEmitter.on('death', () => this.handleBotDeath());
+        eventEmitter.on('respawn', () => this.handleBotRespawn());
+    }
+    
+    private handleBotDeath(): void {
+        console.warn('[TaskManager] Bot has died. Clearing all tasks and states.');
+        this.behaviorEngine.stopCurrentBehavior();
+        this.activeTask = null;
+        this.taskQueue = [];
+    }
+
+    private handleBotRespawn(): void {
+        console.log('[TaskManager] Bot has respawned. Re-evaluating behavior.');
+        this.tick();
     }
 
     public addTask(type: Task['type'], args: any, priority?: number): string {
@@ -77,13 +96,9 @@ export class TaskManager {
         
         this.startDefaultBehavior();
     }
-
-    /**
-     * ★追加★ デフォルト行動を開始する
-     * CommandHandlerからモードが変更されたときに呼び出される
-     */
+    
     public startDefaultBehavior(): void {
-        if (this.activeTask) return; // 何か実行中なら何もしない
+        if (this.activeTask) return;
 
         if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
             const followTask: Task = {
@@ -106,10 +121,6 @@ export class TaskManager {
         }
     }
 
-    /**
-     * ★追加★ 現在のタスクが指定されたタイプの場合のみ停止する
-     * @param type 停止対象のタスクタイプ
-     */
     public stopCurrentTaskIfItIs(type: Task['type']): void {
         if (this.activeTask && this.activeTask.type === type) {
             this.stopCurrentTask();

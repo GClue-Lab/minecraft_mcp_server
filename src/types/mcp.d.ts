@@ -39,8 +39,13 @@ export interface BotStatus {
     position: Vec3;
     homePosition: Vec3 | null;
     equipment: { [key: string]: string | null };
-    // ★ここを修正: item.type は number なので string から number に変更
     inventory: { name: string, count: number, type: number }[];
     nearbyEntities: { name: string, type: string, distance: number }[];
     currentTask: { taskId: string, type: string, detail: string } | null;
+    // ★ここを追加: モードの状態を格納するプロパティ
+    modes: {
+        combatMode: boolean;
+        followMode: boolean;
+        followTarget: string | null;
+    };
 }
