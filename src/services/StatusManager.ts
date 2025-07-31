@@ -1,28 +1,28 @@
-// src/services/StatusManager.ts (修正版)
+// src/services/StatusManager.ts (最新版フルコード)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
 import { BotStatus } from '../types/mcp';
 import { WorldKnowledge } from './WorldKnowledge';
 import { TaskManager } from './TaskManager';
-import { ModeManager } from './ModeManager'; // ModeManagerをインポート
+import { ModeManager } from './ModeManager';
 
 /**
  * ボットのあらゆる状態を一元的に集約・管理するクラス。
+ * 正確な状況報告の唯一の情報源となる。
  */
 export class StatusManager {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private taskManager: TaskManager;
-    private modeManager: ModeManager; // ModeManagerへの参照を追加
+    private modeManager: ModeManager;
     private homePosition: Vec3 | null = null;
 
-    // コンストラクタにmodeManagerを追加
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, taskManager: TaskManager, modeManager: ModeManager) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.taskManager = taskManager;
-        this.modeManager = modeManager; // 参照を保持
+        this.modeManager = modeManager;
     }
 
     public setHome(position: Vec3): void {

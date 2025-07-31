@@ -38,22 +38,30 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    const commandHandler = new CommandHandler(botManager, null, null, null, null);
+    
+    // ★ここから新しい初期化ロジック★
+    // 1. すべてのManagerクラスを、botインスタンスなしで先に生成する
+    const modeManager = new ModeManager();
+    // CommandHandlerはまだ不完全な状態で生成
+    const commandHandler = new CommandHandler(botManager, null, null, modeManager, null);
 
+    // 2. 'spawn'イベントを受け取ったら、各Managerにbotインスタンスを注入して完成させる
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
-            const modeManager = new ModeManager();
             const taskManager = new TaskManager(behaviorEngine, modeManager, botManager);
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
             
+            // CommandHandlerを完全な状態にする
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
         } else {
+            // 再接続時の処理
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // TODO: 再接続時のインスタンス更新
+            // TODO: 他のManagerのインスタンスも更新する
         }
     });
+    // ★ここまで新しい初期化ロジック★
 
     botManager.connect().catch(err => { /* 静音モード */ });
 
@@ -72,7 +80,9 @@ async function main() {
                     continue;
                 }
                 if (request.method === 'tools/call') {
+                    // isReady()で、botインスタンスが注入されるまで待機する
                     while (!commandHandler.isReady()) { await new Promise(resolve => setTimeout(resolve, 100)); }
+                    
                     const toolName = request.params.name;
                     const args = request.params.arguments;
                     let command: McpCommand | null = null;

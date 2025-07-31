@@ -9,12 +9,13 @@ export class ModeManager {
     private followTarget: string | null = null;
 
     public setCombatMode(enabled: boolean): void {
-        console.error(`[DIAGNOSTIC] ModeManager.setCombatMode called. Before: ${this.combatMode}. After: ${enabled}`);
+        // console.errorはSTDIO_MODEでも表示されるため、デバッグに利用
+        console.error(`[DIAGNOSTIC] ModeManager.setCombatMode called. Before: ${this.combatMode}, After: ${enabled}`);
         this.combatMode = enabled;
     }
 
     public setFollowMode(enabled: boolean, target: string | null): void {
-        console.error(`[DIAGNOSTIC] ModeManager.setFollowMode called. Before: ${this.followMode}. After: ${enabled}`);
+        console.error(`[DIAGNOSTIC] ModeManager.setFollowMode called. Before: ${this.followMode}, After: ${enabled}`);
         this.followMode = enabled;
         this.followTarget = enabled ? target : null;
     }
