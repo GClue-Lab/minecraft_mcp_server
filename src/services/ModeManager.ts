@@ -1,8 +1,7 @@
-// src/services/ModeManager.ts (新規作成)
+// src/services/ModeManager.ts (診断ログ付き)
 
 /**
  * ボットの永続的な「モード」設定を管理するクラス。
- * TaskManagerが「次に何をすべきか」を判断する際に参照する。
  */
 export class ModeManager {
     private combatMode: boolean = false;
@@ -10,14 +9,14 @@ export class ModeManager {
     private followTarget: string | null = null;
 
     public setCombatMode(enabled: boolean): void {
+        console.error(`[DIAGNOSTIC] ModeManager.setCombatMode called. Before: ${this.combatMode}. After: ${enabled}`);
         this.combatMode = enabled;
-        console.log(`[ModeManager] Combat mode set to: ${enabled}`);
     }
 
     public setFollowMode(enabled: boolean, target: string | null): void {
+        console.error(`[DIAGNOSTIC] ModeManager.setFollowMode called. Before: ${this.followMode}. After: ${enabled}`);
         this.followMode = enabled;
         this.followTarget = enabled ? target : null;
-        console.log(`[ModeManager] Follow mode set to: ${enabled}, Target: ${this.followTarget}`);
     }
 
     public isCombatMode(): boolean {
@@ -36,6 +35,7 @@ export class ModeManager {
      * 現在のモード設定をオブジェクトで返す
      */
     public getStatus() {
+        console.error(`[DIAGNOSTIC] ModeManager.getStatus called. Returning followMode: ${this.followMode}`);
         return {
             combatMode: this.combatMode,
             followMode: this.followMode,

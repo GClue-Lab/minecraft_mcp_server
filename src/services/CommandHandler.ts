@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts (レポート修正版)
+// src/services/CommandHandler.ts (最新版フルコード)
 
 import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
@@ -8,6 +8,10 @@ import { ModeManager } from './ModeManager';
 import { StatusManager } from './StatusManager';
 import { Vec3 } from 'vec3';
 
+/**
+ * main.tsからコマンドを受け取り、各Managerに処理を振り分ける司令塔。
+ * 古いコマンド体系と新しいアーキテクチャの間の「翻訳者」として機能する。
+ */
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
@@ -88,10 +92,9 @@ export class CommandHandler {
                 this.statusManager.setHome(new Vec3(command.position.x, command.position.y, command.position.z));
                 return `Home position has been set to ${command.position.x}, ${command.position.y}, ${command.position.z}`;
 
-            // ★ここを修正: StatusManagerから取得した情報でレポートを作成
             case 'getStatus':
                 const fullStatus = this.statusManager.getFullStatus();
-                const taskStatus = this.taskManager.getStatus(); // TaskManagerからも最新のキュー情報を取得
+                const taskStatus = this.taskManager.getStatus();
 
                 let report = `--- Bot Status Report ---\n`;
                 report += `[Bot Info]\n- Health: ${fullStatus.health}, Food: ${fullStatus.hunger}\n- Position: ${fullStatus.position.toString()}\n`;

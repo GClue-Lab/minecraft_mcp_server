@@ -1,4 +1,4 @@
-// src/main.ts (引数修正版)
+// src/main.ts (最新版フルコード)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -45,9 +45,7 @@ async function main() {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
             const modeManager = new ModeManager();
-            // ★ここを修正: TaskManagerにbotManagerを渡す
             const taskManager = new TaskManager(behaviorEngine, modeManager, botManager);
-            // ★ここを修正: StatusManagerにmodeManagerを渡す
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
             
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);

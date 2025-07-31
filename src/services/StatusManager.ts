@@ -17,7 +17,7 @@ export class StatusManager {
     private modeManager: ModeManager; // ModeManagerへの参照を追加
     private homePosition: Vec3 | null = null;
 
-    // ★ここを修正: コンストラクタにmodeManagerを追加
+    // コンストラクタにmodeManagerを追加
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, taskManager: TaskManager, modeManager: ModeManager) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
@@ -39,7 +39,7 @@ export class StatusManager {
      */
     public getFullStatus(): BotStatus {
         const activeTaskInfo = this.taskManager.getStatus().activeTask;
-        const modeStatus = this.modeManager.getStatus(); // ★ここを追加: ModeManagerから最新情報を取得
+        const modeStatus = this.modeManager.getStatus(); // ModeManagerから最新情報を取得
 
         return {
             health: this.bot.health,
@@ -62,7 +62,7 @@ export class StatusManager {
                 type: activeTaskInfo.type,
                 detail: JSON.stringify(activeTaskInfo.arguments)
             } : null,
-            // ★ここを追加: ModeManagerから取得したモード情報をステータスに含める
+            // ModeManagerから取得したモード情報をステータスに含める
             modes: modeStatus
         };
     }
