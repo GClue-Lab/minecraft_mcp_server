@@ -1,28 +1,48 @@
-// src/main.ts (最終完成版)
+// src/main.ts (修正版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
 import { WorldKnowledge } from './services/WorldKnowledge';
 import { BehaviorEngine } from './services/BehaviorEngine';
+import { TaskManager } from './services/TaskManager'; // ===== 追加 =====
 import * as mineflayer from 'mineflayer';
-import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
 
-if (process.env.STDIO_MODE === 'true') {
-    console.log = () => {};
-    console.warn = () => {};
-    console.info = () => {};
-    console.debug = () => {};
-    console.error = () => {};
-}
-
+// ===== ここからツール定義を新しい設計に合わせて変更 =====
 const BOT_TOOLS_SCHEMA = [
-  { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string", "description": "採掘するブロックの英語名 (例: oak_log, stone)" }, "quantity": { "type": "integer", "description": "採掘する数量" } }, "required": ["blockName", "quantity"] } },
-  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "追従を開始する場合は'on', 停止する場合は'off'を指定。" }, "targetPlayer": { "type": "string", "description": "追従を開始する場合に必須の、ターゲットプレイヤー名。" } }, "required": ["mode"] } },
-  { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"], "description": "戦闘モードを有効にする（オンにする、警戒モードにする）場合は'on', 無効にする場合は'off'を指定。" } }, "required": ["mode"] } }
+  {
+    "name": "get_full_status",
+    "description": "ボットの包括的な状態（HP、空腹、位置、インベントリ、装備、周辺環境、現在タスク）を取得する。"
+  },
+  {
+    "name": "add_task",
+    "description": "ボットのタスクキューに新しいタスクを追加する。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskType": { "type": "string", "enum": ["mine", "follow", "combat", "goto", "dropItems", "patrol"] },
+        "arguments": { "type": "object", "description": "タスクタイプに応じた引数。例: {'blockName': 'stone', 'quantity': 10}" },
+        "priority": { "type": "integer", "description": "タスクの優先度（0が最高）。省略時はデフォルト値。" }
+      },
+      "required": ["taskType", "arguments"]
+    }
+  },
+  {
+    "name": "cancel_task",
+    "description": "指定したIDのタスクをキャンセルする。",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "taskId": { "type": "string" } },
+      "required": ["taskId"]
+    }
+  },
+  {
+    "name": "get_task_queue",
+    "description": "現在のタスクキューの内容を一覧で取得する。"
+  }
 ];
+// ===== ここまでツール定義の変更 =====
+
 
 function sendResponse(responseObject: any) {
     process.stdout.write(JSON.stringify(responseObject) + '\n');
@@ -34,21 +54,27 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    const commandHandler = new CommandHandler(botManager, null, null);
+    
+    // ===== ここからインスタンス化のロジックを変更 =====
+    // CommandHandlerはまだTaskManagerを知らないので、nullで初期化
+    const commandHandler = new CommandHandler(botManager, null);
 
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
-        let worldKnowledge = commandHandler.getWorldKnowledge();
-        let behaviorEngine = commandHandler.getBehaviorEngine();
-        if (!worldKnowledge || !behaviorEngine) {
-            worldKnowledge = new WorldKnowledge(bot);
-            behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
-            commandHandler.setWorldKnowledge(worldKnowledge);
-            commandHandler.setBehaviorEngine(behaviorEngine);
+        // CommandHandlerが既にすべてのインスタンスを持っているかチェック
+        if (!commandHandler.isReady()) {
+            const worldKnowledge = new WorldKnowledge(bot);
+            const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
+            const taskManager = new TaskManager(behaviorEngine); // TaskManagerをインスタンス化
+            
+            // CommandHandlerに必要なインスタンスをすべて設定
+            commandHandler.setDependencies(worldKnowledge, behaviorEngine, taskManager);
         } else {
-            worldKnowledge.setBotInstance(bot);
-            behaviorEngine.setBotInstance(bot);
+            // 既存のインスタンスに新しいbotインスタンスを設定
+            commandHandler.getWorldKnowledge()?.setBotInstance(bot);
+            commandHandler.getBehaviorEngine()?.setBotInstance(bot);
         }
     });
+    // ===== ここまでインスタンス化のロジックの変更 =====
 
     botManager.connect().catch(err => { /* 静音モードでは何もしない */ });
 
@@ -59,11 +85,8 @@ async function main() {
             const request = JSON.parse(line);
 
             if (request.jsonrpc === '2.0' && request.method) {
-                if (request.method === 'initialize') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {}, protocolVersion: request.params.protocolVersion, serverInfo: { name: "my-minecraft-bot", version: "1.0.0" } } });
-                    continue;
-                }
-                if (request.method === 'notifications/initialized') { continue; }
+                if (request.method === 'initialize' || request.method === 'notifications/initialized') continue;
+                
                 if (request.method === 'tools/list') {
                     sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
                     continue;
@@ -73,41 +96,18 @@ async function main() {
                         await new Promise(resolve => setTimeout(resolve, 200));
                     }
                     
-                    const toolName = request.params.name;
-                    const args = request.params.arguments;
-                    let command: McpCommand | null = null;
-
-                    switch (toolName) {
-                        case 'minecraft_get_status':
-                            command = { type: 'getStatus', id: request.id }; break;
-                        case 'minecraft_stop_behavior':
-                            command = { type: 'stop', id: request.id }; break;
-                        case 'minecraft_set_mining_mode':
-                            command = { type: 'setMiningMode', mode: 'on', ...args, id: request.id }; break;
-                        case 'minecraft_set_follow_mode':
-                            command = { type: 'setFollowMode', ...args, id: request.id }; break;
-                        case 'minecraft_set_combat_mode':
-                            command = { type: 'setCombatMode', ...args, id: request.id }; break;
-                    }
-                    
-                    if (command) {
-                        try {
-                            const result = await commandHandler.handleCommand(command);
-                            // mcpoが期待する{"content": "..."}という形式で応答を組み立てる
-                            const resultString = typeof result === 'string' ? result : JSON.stringify(result);
-                            sendResponse({
-                                jsonrpc: '2.0',
-                                id: request.id,
-                                result: {
-                                    content: [{
-                                        type: "text",
-                                        text: resultString
-                                    }]
-                                }
-                            });
-                        } catch (error: any) {
-                            sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
-                        }
+                    try {
+                        // コマンド処理をCommandHandlerに完全に委譲
+                        const result = await commandHandler.handleToolCall(request.params.name, request.params.arguments);
+                        
+                        const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                        sendResponse({
+                            jsonrpc: '2.0',
+                            id: request.id,
+                            result: { content: [{ type: "text", text: resultString }] }
+                        });
+                    } catch (error: any) {
+                        sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
                     }
                     continue;
                 }
@@ -117,3 +117,4 @@ async function main() {
 }
 
 main();
+
