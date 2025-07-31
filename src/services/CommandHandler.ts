@@ -1,103 +1,92 @@
 // src/services/CommandHandler.ts (最終修正版)
 
+import { McpCommand, Task } from '../types/mcp';
 import { BotManager } from './BotManager';
 import { WorldKnowledge } from './WorldKnowledge';
-import { BehaviorEngine } from './BehaviorEngine';
-import { TaskManager } from './TaskManager';
+import { TaskManager } from './TaskManager'; // BehaviorEngineの代わりにTaskManagerをインポート
 
-/**
- * AIからのツール呼び出し(Tool Call)を受け取り、
- * 適切なマネージャークラスに処理を振り分ける。
- */
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
-    private behaviorEngine: BehaviorEngine | null = null;
     private taskManager: TaskManager | null = null;
 
-    // コンストラクタを簡略化。初期段階ではTaskManagerは未設定。
-    constructor(botManager: BotManager, taskManager: TaskManager | null) {
+    // 依存関係を更新
+    constructor(botManager: BotManager, worldKnowledge: WorldKnowledge | null, taskManager: TaskManager | null) {
         this.botManager = botManager;
-        this.taskManager = taskManager;
-    }
-
-    /**
-     * ボットのspawn後に、依存する全てのインスタンスを設定する。
-     * @param worldKnowledge
-     * @param behaviorEngine
-     * @param taskManager
-     */
-    public setDependencies(
-        worldKnowledge: WorldKnowledge,
-        behaviorEngine: BehaviorEngine,
-        taskManager: TaskManager
-    ): void {
         this.worldKnowledge = worldKnowledge;
-        this.behaviorEngine = behaviorEngine;
         this.taskManager = taskManager;
-        console.log('CommandHandler dependencies have been set.');
     }
 
-    /**
-     * ボットがコマンドを処理できる状態かを確認する。
-     * @returns 準備ができていればtrue
-     */
     public isReady(): boolean {
-        return !!this.worldKnowledge && !!this.behaviorEngine && !!this.taskManager;
+        return !!this.worldKnowledge && !!this.taskManager;
     }
 
-    // デバッグや他のクラスからの参照用にゲッターを用意
+    // 依存関係注入メソッドも更新
+    public setDependencies(worldKnowledge: WorldKnowledge, taskManager: TaskManager): void {
+        this.worldKnowledge = worldKnowledge;
+        this.taskManager = taskManager;
+    }
+
     public getWorldKnowledge(): WorldKnowledge | null { return this.worldKnowledge; }
-    public getBehaviorEngine(): BehaviorEngine | null { return this.behaviorEngine; }
 
     /**
-     * AIからのツール呼び出しを処理するメインメソッド。
-     * @param toolName 呼び出されたツール名
-     * @param args ツールに渡された引数
+     * main.ts や mcpApi.ts から古い形式のコマンドを受け取り、処理する
+     * @param command McpCommand形式のコマンド
      * @returns 処理結果
      */
-    public async handleToolCall(toolName: string, args: any): Promise<any> {
-        if (!this.isReady() || !this.taskManager) {
+    public async handleCommand(command: McpCommand): Promise<any> {
+        if (!this.isReady() || !this.taskManager || !this.worldKnowledge) {
             throw new Error("Bot is not fully ready or connected.");
         }
         
-        switch (toolName) {
-            case 'add_task':
-                if (!args.taskType || !args.arguments) {
-                    throw new Error("add_task requires 'taskType' and 'arguments'.");
+        // McpCommandをTaskManagerへの命令に変換
+        switch (command.type) {
+            case 'setMiningMode':
+                const taskId = this.taskManager.addTask('mine', { 
+                    blockName: command.blockName, 
+                    quantity: command.quantity 
+                });
+                return `Mining task started with ID: ${taskId}`;
+
+            case 'setFollowMode':
+                if (command.mode === 'on') {
+                    if (!command.targetPlayer) throw new Error("targetPlayer is required.");
+                    if (!this.worldKnowledge.findPlayer(command.targetPlayer)) {
+                        throw new Error(`Player '${command.targetPlayer}' not found.`);
+                    }
+                    const followTaskId = this.taskManager.addTask('follow', { 
+                        targetPlayer: command.targetPlayer 
+                    });
+                    return `Follow task started with ID: ${followTaskId}`;
+                } else {
+                    this.taskManager.stopCurrentTask();
+                    return "Stopped current task.";
                 }
-                const taskId = this.taskManager.addTask(args.taskType, args.arguments, args.priority);
-                return `Task ${args.taskType} added to queue with ID: ${taskId}`;
 
-            case 'cancel_task':
-                if (!args.taskId) {
-                    throw new Error("cancel_task requires 'taskId'.");
+            case 'setCombatMode':
+                if (command.mode === 'on') {
+                     const combatTaskId = this.taskManager.addTask('combat', {}, 0); // 優先度0
+                     return `Combat task started with ID: ${combatTaskId}`;
+                } else {
+                    this.taskManager.stopCurrentTask();
+                    return "Stopped current task.";
                 }
-                const success = this.taskManager.cancelTask(args.taskId);
-                return success ? `Task ${args.taskId} cancelled.` : `Task ${args.taskId} not found or could not be cancelled.`;
 
-            // mcpApi.tsからの古い 'stop' コマンドを処理するための内部的なケース
-            case 'stop_current_task':
-                const stopped = this.taskManager.cancelActiveTask();
-                return stopped ? "Current task has been stopped." : "There was no active task to stop.";
-
-            case 'get_task_queue':
-                return this.taskManager.getTaskQueueStatus();
-            
-            case 'get_full_status':
-                // TODO: StatusManagerを実装後に、そこから情報を取得する
-                const bot = this.botManager.getBot();
-                if (!bot) return { message: "Bot not available."};
+            case 'getStatus':
+                const bot = this.botManager.getBot()!;
                 return {
-                    message: "Current bot status (minimal). Full status requires StatusManager.",
-                    position: bot.entity.position,
+                    status: this.taskManager.getStatus(),
                     health: bot.health,
                     food: bot.food,
-                    active_task: this.taskManager.getTaskQueueStatus().activeTask
+                    position: bot.entity.position
                 };
 
+            case 'stop':
+                this.taskManager.stopCurrentTask();
+                return "All current actions have been stopped.";
+                
             default:
-                throw new Error(`Unknown tool name received: ${toolName}`);
+                throw new Error(`Unknown command type received: ${command.type}`);
         }
     }
 }
