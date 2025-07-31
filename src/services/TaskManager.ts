@@ -2,10 +2,9 @@
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
-import { ModeManager } from './ModeManager'; // ModeManagerをインポート
+import { ModeManager } from './ModeManager';
 import { randomUUID } from 'crypto';
 
-// タスクのデフォルト優先度を定義
 const TASK_PRIORITIES: { [key in Task['type']]: number } = {
     'combat': 0,
     'mine': 5,
@@ -18,16 +17,17 @@ const TASK_PRIORITIES: { [key in Task['type']]: number } = {
 export class TaskManager {
     private taskQueue: Task[] = [];
     private behaviorEngine: BehaviorEngine;
-    private modeManager: ModeManager; // ModeManagerへの参照を持つ
+    private modeManager: ModeManager;
     private activeTask: Task | null = null;
 
     constructor(behaviorEngine: BehaviorEngine, modeManager: ModeManager) {
         this.behaviorEngine = behaviorEngine;
-        this.modeManager = modeManager; // インスタンスを保持
+        this.modeManager = modeManager;
         console.log('TaskManager (Advanced) initialized.');
 
-        this.behaviorEngine.on('taskCompleted', (task, result) => this.onTaskFinished(task));
-        this.behaviorEngine.on('taskFailed', (task, reason) => this.onTaskFinished(task));
+        // ★ここを修正: イベントリスナーの引数に型を追加
+        this.behaviorEngine.on('taskCompleted', (task: Task | null, result: any) => this.onTaskFinished(task));
+        this.behaviorEngine.on('taskFailed', (task: Task | null, reason: any) => this.onTaskFinished(task));
     }
 
     public addTask(type: Task['type'], args: any, priority?: number): string {
@@ -42,13 +42,10 @@ export class TaskManager {
         
         console.log(`[TaskManager] New task received: ${type} (Priority: ${newTask.priority})`);
         
-        // ★割り込み処理★
-        // 新しいタスクが現在実行中のタスクより優先度が高いか？
         if (this.activeTask && newTask.priority < this.activeTask.priority) {
             console.log(`[TaskManager] INTERRUPT: New task has higher priority. Stopping current task.`);
-            // 現在のタスクをキューの先頭に戻して後で再試行させる
             this.taskQueue.unshift(this.activeTask);
-            this.behaviorEngine.stopCurrentBehavior(); // これが完了すると onTaskFinished が呼ばれ、tickが走る
+            this.behaviorEngine.stopCurrentBehavior();
         }
         
         this.taskQueue.push(newTask);
@@ -65,12 +62,8 @@ export class TaskManager {
     }
 
     private tick(): void {
-        // 実行中のタスクがある場合は何もしない
-        if (this.activeTask) {
-            return;
-        }
+        if (this.activeTask) return;
 
-        // 実行すべきタスクがキューにあれば実行
         if (this.taskQueue.length > 0) {
             this.activeTask = this.taskQueue.shift()!;
             this.activeTask.status = 'running';
@@ -79,8 +72,6 @@ export class TaskManager {
             return;
         }
 
-        // ★デフォルト行動の決定★
-        // キューが空の場合、モード設定に基づいて行動する
         if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
             const followTask: Task = {
                 taskId: 'default-follow',
@@ -94,7 +85,6 @@ export class TaskManager {
             console.log(`[TaskManager] Queue is empty. Starting default behavior: Follow`);
             this.behaviorEngine.executeTask(this.activeTask);
         }
-        // TODO: 警戒モードがONなら、周囲を索敵する 'patrol' タスクをデフォルトにするなどのロジックを追加
     }
     
     public stopCurrentTask(): void {

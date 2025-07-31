@@ -1,8 +1,7 @@
-// src/types/mcp.d.ts
+// src/types/mcp.d.ts (修正版)
 
 import { Vec3 } from 'vec3';
 
-// 既存の型定義
 export type BehaviorName = 'combat' | 'followPlayer' | 'mineBlock' | 'idle';
 
 export interface CurrentBehavior {
@@ -12,27 +11,23 @@ export interface CurrentBehavior {
 }
 
 export interface McpCommand {
-    type: 'setMiningMode' | 'setFollowMode' | 'setCombatMode' | 'getStatus' | 'stop';
+    type: 'setMiningMode' | 'setFollowMode' | 'setCombatMode' | 'getStatus' | 'stop' | 'setHome';
     id: number;
     mode?: 'on' | 'off';
     blockName?: string;
     quantity?: number;
     targetPlayer?: string;
+    position?: { x: number, y: number, z: number };
 }
 
-// ===== ここから追加 =====
-
-/**
- * タスクキューで管理される個々のタスクの型定義
- */
 export interface Task {
-    taskId: string; // UUIDなどで一意に識別
+    taskId: string;
     type: 'mine' | 'follow' | 'combat' | 'goto' | 'dropItems' | 'patrol';
     status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-    arguments: any; // 例: { blockName: 'stone', quantity: 10 }
+    arguments: any;
     priority: number;
     createdAt: number;
-    result?: any; // タスク完了時の結果
+    result?: any;
 }
 
 /**
@@ -43,15 +38,9 @@ export interface BotStatus {
     hunger: number;
     position: Vec3;
     homePosition: Vec3 | null;
-    equipment: {
-        hand: string | null;
-        head: string | null;
-        torso: string | null;
-        legs: string | null;
-        feet: string | null;
-    };
-    inventory: { name: string, count: number, type: string }[];
+    equipment: { [key: string]: string | null };
+    // ★ここを修正: item.type は number なので string から number に変更
+    inventory: { name: string, count: number, type: number }[];
     nearbyEntities: { name: string, type: string, distance: number }[];
-    nearbyResources: { name: string, distance: number, positions: Vec3[] }[];
     currentTask: { taskId: string, type: string, detail: string } | null;
 }
