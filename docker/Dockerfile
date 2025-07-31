@@ -21,6 +21,18 @@ ENV MCP_SERVER_PORT=3000
 COPY package*.json ./
 RUN npm install
 
+# patch コマンドのために build-essential をインストール
+RUN apt-get update && \
+    apt-get install -y patch && \
+    rm -rf /var/lib/apt/lists/*
+
+# パッチファイルをコピー
+COPY patches/mineflayer-physics-safe.patch /tmp/physics.patch
+
+# mineflayerのパッチ適用
+RUN patch -p1 -d node_modules/mineflayer < /tmp/physics.patch
+
+
 # 必要なソースコードと設定ファイルをコピー
 COPY src ./src
 COPY tsconfig.json ./
@@ -33,7 +45,6 @@ EXPOSE 3000
 
 # コンテナ起動時に実行するコマンド
 CMD [ "npm", "start" ]
-
 
 # 必要なパッケージをインストール（vim, tree）
 #RUN apt update && \
