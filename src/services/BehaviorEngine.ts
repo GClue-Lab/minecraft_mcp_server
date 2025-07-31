@@ -1,7 +1,7 @@
 // src/services/BehaviorEngine.ts (タスク実行エンジン版)
 
 import * as mineflayer from 'mineflayer';
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'events'; // EventEmitterをインポート
 import { WorldKnowledge } from './WorldKnowledge';
 import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
 import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
@@ -19,6 +19,7 @@ interface BehaviorInstance {
     getOptions(): any;
 }
 
+// EventEmitterを継承して、イベントを通知できるようにする
 export class BehaviorEngine extends EventEmitter {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
@@ -27,7 +28,7 @@ export class BehaviorEngine extends EventEmitter {
     private activeTask: Task | null = null;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager) {
-        super();
+        super(); // 親クラスのコンストラクタを呼び出す
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.botManager = botManager;
@@ -42,6 +43,7 @@ export class BehaviorEngine extends EventEmitter {
     /**
      * TaskManagerから渡されたタスクを実行する
      * @param task 実行するタスクオブジェクト
+     * @returns タスクの開始に成功したか
      */
     public executeTask(task: Task): boolean {
         if (this.activeBehaviorInstance) {
@@ -105,11 +107,13 @@ export class BehaviorEngine extends EventEmitter {
      */
     private monitorBehaviorCompletion(instance: BehaviorInstance): void {
         const checkInterval = setInterval(() => {
+            // 監視中に別のタスクが割り込んだ（または停止された）場合は、監視を終了
             if (!this.activeBehaviorInstance || instance !== this.activeBehaviorInstance) {
                 clearInterval(checkInterval);
                 return;
             }
 
+            // Behaviorが終了したら、TaskManagerに通知
             if (!instance.isRunning()) {
                 clearInterval(checkInterval);
                 console.log(`[BehaviorEngine] Behavior for task ${this.activeTask?.type} completed.`);
@@ -121,6 +125,10 @@ export class BehaviorEngine extends EventEmitter {
         }, 500);
     }
 
+    /**
+     * 現在実行中のタスクを取得する
+     * @returns 実行中のタスクオブジェクト、なければnull
+     */
     public getActiveTask(): Task | null {
         return this.activeTask;
     }
