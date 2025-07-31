@@ -1,4 +1,4 @@
-// src/main.ts (初期化シーケンス修正版)
+// src/main.ts (スキーマ定義修正版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -17,10 +17,12 @@ if (process.env.STDIO_MODE === 'true') {
     console.error = () => {};
 }
 
+// ===== ★ここから修正：全てのツールにinputSchemaを定義★ =====
 const BOT_TOOLS_SCHEMA = [
   {
     "name": "get_full_status",
-    "description": "ボットの包括的な状態（HP、空腹、位置、インベントリ、装備、周辺環境、現在タスク）を取得する。"
+    "description": "ボットの包括的な状態（HP、空腹、位置、インベントリ、装備、周辺環境、現在タスク）を取得する。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
   },
   {
     "name": "add_task",
@@ -46,12 +48,13 @@ const BOT_TOOLS_SCHEMA = [
   },
   {
     "name": "get_task_queue",
-    "description": "現在のタスクキューの内容を一覧で取得する。"
+    "description": "現在のタスクキューの内容を一覧で取得する。",
+    "inputSchema": { "type": "object", "properties": {}, "required": [] }
   }
 ];
+// ===== ★ここまで修正★ =====
 
 function sendResponse(responseObject: any) {
-    // レスポンスをコンソールに出力する前に、文字列に変換
     process.stdout.write(JSON.stringify(responseObject) + '\n');
 }
 
@@ -84,7 +87,6 @@ async function main() {
             const request = JSON.parse(line);
 
             if (request.jsonrpc === '2.0' && request.method) {
-                // ===== ★ここから修正：正しい初期化シーケンスを実装★ =====
                 if (request.method === 'initialize') {
                     sendResponse({
                         jsonrpc: '2.0',
@@ -102,7 +104,6 @@ async function main() {
                 }
 
                 if (request.method === 'notifications/initialized') {
-                    // この通知には応答不要
                     continue;
                 }
 
@@ -114,10 +115,8 @@ async function main() {
                     });
                     continue;
                 }
-                // ===== ★ここまで修正★ =====
 
                 if (request.method === 'tools/call') {
-                    // ボットの準備ができるまで待機
                     while (!commandHandler.isReady()) {
                         await new Promise(resolve => setTimeout(resolve, 200));
                     }
@@ -125,7 +124,6 @@ async function main() {
                     try {
                         const result = await commandHandler.handleToolCall(request.params.name, request.params.arguments);
                         
-                        // レスポンスフォーマットをMCP仕様に準拠させる
                         const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
                         sendResponse({
                             jsonrpc: '2.0',
