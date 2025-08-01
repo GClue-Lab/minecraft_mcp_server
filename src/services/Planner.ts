@@ -1,4 +1,4 @@
-// src/services/Planner.ts (最終修正版)
+// src/services/Planner.ts (ロジック修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -52,37 +52,44 @@ export class Planner {
         console.log('Planner initialized. Bot brain is now active.');
     }
 
+    // ★★★★★★★★★★ ここからロジックを全面的に修正 ★★★★★★★★★★
     private mainLoop(): void {
         const currentTask = this.behaviorEngine.getActiveTask();
         const decidedAction = this.decideNextAction();
 
-        if (!decidedAction) {
-            if (currentTask) {
+        if (currentTask) {
+            // --- ケース1: ボットが何かタスクを実行中の場合 ---
+            
+            // 割り込みをチェックする。
+            // 新しく決定された行動があり、かつその優先度が現在実行中のタスクより高い場合のみ中断する。
+            if (decidedAction && decidedAction.priority < currentTask.priority) {
                 this.behaviorEngine.stopCurrentBehavior();
             }
-            return;
-        }
+            // 割り込みがなければ何もしない。現在のタスクを継続させる。
+            // decidedActionがnullでも、currentTaskは中断されない。
 
-        if (!currentTask) {
-            let taskToExecute: Task | null = null;
-            if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
-                taskToExecute = this.taskManager.getNextMiningTask();
-            } else if (this.taskManager.peekNextGeneralTask()?.taskId === decidedAction.taskId) {
-                taskToExecute = this.taskManager.getNextGeneralTask();
-            } else {
-                taskToExecute = decidedAction;
-            }
-            
-            if (taskToExecute) {
-                this.behaviorEngine.executeTask(taskToExecute);
-            }
-            return;
-        }
+        } else {
+            // --- ケース2: ボットがアイドル状態の場合 ---
 
-        if (decidedAction.priority < currentTask.priority) {
-            this.behaviorEngine.stopCurrentBehavior();
+            // もし何かすべき行動が決定されたなら、新しいタスクを開始する。
+            if (decidedAction) {
+                let taskToExecute: Task | null = null;
+                if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
+                    taskToExecute = this.taskManager.getNextMiningTask();
+                } else if (this.taskManager.peekNextGeneralTask()?.taskId === decidedAction.taskId) {
+                    taskToExecute = this.taskManager.getNextGeneralTask();
+                } else {
+                    taskToExecute = decidedAction;
+                }
+                
+                if (taskToExecute) {
+                    this.behaviorEngine.executeTask(taskToExecute);
+                }
+            }
+            // 何もすべき行動がなければ（decidedActionがnull）、何もしない。アイドル状態を維持する。
         }
     }
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     private decideNextAction(): Task | null {
         if (this.modeManager.isCombatMode()) {
