@@ -1,4 +1,4 @@
-// src/services/Planner.ts (デバッグ報告修正版)
+// src/services/Planner.ts (最終修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -7,7 +7,7 @@ import { WorldKnowledge } from './WorldKnowledge';
 import { StatusManager } from './StatusManager';
 import { Task } from '../types/mcp';
 import { WorldEntity } from './WorldKnowledge';
-import { ChatReporter } from './ChatReporter'; // ChatReporterをインポート
+import { ChatReporter } from './ChatReporter';
 
 const ACTION_PRIORITIES: { [key in Task['type']]: number } = {
     'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
@@ -20,7 +20,7 @@ export class Planner {
     private worldKnowledge: WorldKnowledge;
     private statusManager: StatusManager;
     private mainLoopInterval: NodeJS.Timeout;
-    private chatReporter: ChatReporter; // chatReporterプロパティを追加
+    private chatReporter: ChatReporter;
 
     constructor(
         behaviorEngine: BehaviorEngine,
@@ -28,19 +28,24 @@ export class Planner {
         modeManager: ModeManager,
         worldKnowledge: WorldKnowledge,
         statusManager: StatusManager,
-        chatReporter: ChatReporter // コンストラクタで受け取る
+        chatReporter: ChatReporter
     ) {
         this.behaviorEngine = behaviorEngine;
         this.taskManager = taskManager;
         this.modeManager = modeManager;
         this.worldKnowledge = worldKnowledge;
         this.statusManager = statusManager;
-        this.chatReporter = chatReporter; // 保持する
+        this.chatReporter = chatReporter;
 
         this.behaviorEngine.on('taskFinished', () => this.mainLoop());
         
+        // メインの思考ループ
         this.mainLoopInterval = setInterval(async () => {
+            // ループの最初に、ごく短いスリープを設ける
+            // これにより、mineflayerがイベントを処理するための「隙」が生まれる
             await new Promise(resolve => setTimeout(resolve, 50));
+
+            // その後、通常の思考ループを実行する
             this.mainLoop();
         }, 500);
 
@@ -49,13 +54,6 @@ export class Planner {
 
     private mainLoop(): void {
         const currentTask = this.behaviorEngine.getActiveTask();
-        
-        // ★★★★★★★★★★ ここを修正 ★★★★★★★★★★
-        // スパムでキックされるため、このデバッグ報告をコメントアウトします
-        // const taskName = currentTask ? currentTask.type : 'idle';
-        // this.chatReporter.reportError(`[DEBUG] Planner: mainLoop() called. Current state: ${taskName}`);
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
         const decidedAction = this.decideNextAction();
 
         if (!decidedAction) {
@@ -82,7 +80,6 @@ export class Planner {
         }
 
         if (decidedAction.priority < currentTask.priority) {
-            this.chatReporter.reportError(`[DEBUG] Planner: Interrupting ${currentTask.type} for ${decidedAction.type}.`);
             this.behaviorEngine.stopCurrentBehavior();
         }
     }
