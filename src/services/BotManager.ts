@@ -1,9 +1,8 @@
-// src/services/BotManager.ts (最終修正版)
+// src/services/BotManager.ts (Pathfinder削除版)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
-import { pathfinder, Movements } from 'mineflayer-pathfinder';
-// mcDataはMovementsのコンストラクタで不要なため、インポートを削除
+// pathfinderのインポートを削除
 
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
@@ -28,7 +27,6 @@ export class BotManager {
 
     public async connect(): Promise<void> {
         if (this.status === 'connecting' || this.status === 'connected') return;
-
         this.setStatus('connecting');
 
         try {
@@ -38,24 +36,16 @@ export class BotManager {
                 username: this.username,
             });
 
-            this.bot.loadPlugin(pathfinder);
+            // ★ここを修正: Pathfinderプラグインの読み込みをすべて削除
+            // this.bot.loadPlugin(pathfinder); 
+
             this.setupBotListeners();
 
             await new Promise<void>((resolve, reject) => {
                 if (!this.bot) return reject(new Error("Bot not initialized"));
 
                 this.bot.once('spawn', () => {
-                    // ★ここから修正★
-                    // 1. this.botがnullでないことをTypeScriptに伝える
-                    if (!this.bot) {
-                        console.error("Bot is null after spawn event, this should not happen.");
-                        return;
-                    }
-                    // 2. Movementsのコンストラクタ引数を正しく1つにする
-                    const defaultMove = new Movements(this.bot);
-                    this.bot.pathfinder.setMovements(defaultMove);
-                    // ★ここまで修正★
-
+                    // ★ここを修正: Pathfinderの移動設定もすべて削除
                     this.setStatus('connected');
                     this.botInstanceEventEmitter.emit('spawn', this.bot);
                     resolve();

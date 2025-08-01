@@ -1,22 +1,19 @@
-// src/behaviors/followPlayer.ts (Pathfinder使用版・完全版)
+// src/behaviors/followPlayer.ts (直接制御版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
-import { goals } from 'mineflayer-pathfinder';
 
 export interface FollowPlayerOptions {
     targetPlayer: string;
-    followRadius?: number;
+    distanceThreshold?: number;
 }
 
-/**
- * Pathfinderを使用して、指定されたプレイヤーを追跡する行動を管理するクラス。
- */
 export class FollowPlayerBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private options: Required<FollowPlayerOptions>;
     private isActive: boolean = false;
+    private intervalId: NodeJS.Timeout | null = null;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: FollowPlayerOptions) {
         this.bot = bot;
@@ -24,67 +21,64 @@ export class FollowPlayerBehavior {
         
         this.options = {
             targetPlayer: options.targetPlayer,
-            followRadius: options.followRadius ?? 3, // この距離を保って追従する
+            distanceThreshold: options.distanceThreshold ?? 3,
         };
     }
 
-    /**
-     * 追従行動を開始する。
-     * @returns 行動の開始に成功したか
-     */
     public start(): boolean {
         if (this.isActive) return false;
-
-        const targetPlayerEntity = this.worldKnowledge.getPlayer(this.options.targetPlayer);
-        if (!targetPlayerEntity || !targetPlayerEntity.isValid) {
-            console.warn(`[FollowPlayer] Target player "${this.options.targetPlayer}" not found or invalid. Cannot start.`);
-            return false;
-        }
         
-        this.isActive = true;
-        console.log(`[FollowPlayer] Starting to follow ${this.options.targetPlayer}.`);
-
-        // WorldKnowledgeから得た情報をもとに、mineflayerのエンティティオブジェクトを取得
-        const targetEntity = this.bot.entities[targetPlayerEntity.id];
-        if (!targetEntity) {
-            console.warn(`[FollowPlayer] Could not find Mineflayer entity for ${this.options.targetPlayer}.`);
-            this.isActive = false;
+        const target = this.worldKnowledge.getPlayer(this.options.targetPlayer);
+        if (!target) {
+            console.warn(`[FollowPlayer] Target ${this.options.targetPlayer} not found.`);
             return false;
         }
 
-        // Pathfinderに追跡目標（GoalFollow）を設定
-        const goal = new goals.GoalFollow(targetEntity, this.options.followRadius);
-        this.bot.pathfinder.setGoal(goal, true); // 'true'を設定することで、動き続ける目標を追いかけ続ける
-
+        this.isActive = true;
+        this.intervalId = setInterval(() => this.followLogic(), 500); // 0.5秒ごとに位置を再評価
         return true;
     }
 
-    /**
-     * 追従行動を停止する。
-     */
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
-        // Pathfinderの現在の目標をクリアし、移動を停止させる
-        this.bot.pathfinder.stop();
-        console.log(`[FollowPlayer] Stopped following.`);
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        this.bot.clearControlStates();
     }
 
-    /**
-     * 行動が現在実行中かどうかを返す。
-     * Pathfinderが移動中かどうかで判断する。
-     */
     public isRunning(): boolean {
-        return this.isActive && this.bot.pathfinder.isMoving();
+        return this.isActive;
     }
 
-    /**
-     * 現在の行動オプションを返す。
-     */
     public getOptions(): FollowPlayerOptions {
-        return {
-            targetPlayer: this.options.targetPlayer,
-            followRadius: this.options.followRadius,
-        };
+        return this.options;
+    }
+
+    private followLogic(): void {
+        if (!this.isActive) return;
+
+        const target = this.worldKnowledge.getPlayer(this.options.targetPlayer);
+        if (!target || !target.isValid) {
+            console.log(`[FollowPlayer] Target lost. Stopping.`);
+            this.stop();
+            return;
+        }
+
+        const distance = this.bot.entity.position.distanceTo(target.position);
+        this.bot.lookAt(target.position.offset(0, 1.6, 0), true);
+
+        if (distance > this.options.distanceThreshold) {
+            this.bot.setControlState('forward', true);
+            this.bot.setControlState('sprint', distance > 5); // 5ブロック以上離れていたらダッシュ
+            
+            const botPos = this.bot.entity.position;
+            const targetIsHigher = target.position.y > botPos.y + 0.5;
+            this.bot.setControlState('jump', this.bot.entity.onGround && targetIsHigher);
+        } else {
+            this.bot.clearControlStates(); // 近づいたら停止
+        }
     }
 }
