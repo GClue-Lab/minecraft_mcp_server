@@ -1,4 +1,4 @@
-// src/main.ts (最終修正版)
+// src/main.ts (初期化シーケンス修正版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -38,12 +38,8 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    
-    // ★ここからが新しい初期化ロジック★
-    // 1. CommandHandlerを、中身が空の状態で先にインスタンス化する
     const commandHandler = new CommandHandler(botManager, null, null, null, null);
 
-    // 2. 'spawn'イベントを受け取ったら、各Managerを生成し、CommandHandlerに依存関係を注入して完成させる
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
@@ -51,16 +47,11 @@ async function main() {
             const modeManager = new ModeManager();
             const taskManager = new TaskManager(behaviorEngine, modeManager, botManager, worldKnowledge);
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
-            
-            // 最初に生成したCommandHandlerインスタンスの中身をここで設定する
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
         } else {
-            // 再接続時の処理
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // TODO: 他のManagerのインスタンスも更新する
         }
     });
-    // ★ここまで新しい初期化ロジック★
 
     botManager.connect().catch(err => { /* 静音モード */ });
 
@@ -69,16 +60,29 @@ async function main() {
         try {
             const request = JSON.parse(line);
             if (request.jsonrpc === '2.0' && request.method) {
-                if (request.method === 'initialize' || request.method === 'notifications/initialized') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {} } });
+                // ===== ★ここから修正：正常に動作していた初期化シーケンスに戻す★ =====
+                if (request.method === 'initialize') {
+                    sendResponse({
+                        jsonrpc: '2.0',
+                        id: request.id,
+                        result: {
+                            capabilities: {},
+                            protocolVersion: request.params.protocolVersion,
+                            serverInfo: { name: "my-minecraft-bot", version: "2.0.0" }
+                        }
+                    });
                     continue;
+                }
+                if (request.method === 'notifications/initialized') {
+                    continue; // 応答不要
                 }
                 if (request.method === 'tools/list') {
                     sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
                     continue;
                 }
+                // ===== ★ここまで修正★ =====
+
                 if (request.method === 'tools/call') {
-                    // ★ここを修正: commandHandlerはnullではないことが保証されるため、!commandHandlerチェックは不要
                     while (!commandHandler.isReady()) { 
                         await new Promise(resolve => setTimeout(resolve, 200)); 
                     }
