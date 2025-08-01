@@ -1,7 +1,7 @@
 # minecraft_mcp_server
 minecraft mcp server
 
-
+ 
 ログイン(周辺状況の確認でもログインするよ)
 ```
 curl -X POST -H "Content-Type: application/json" \
