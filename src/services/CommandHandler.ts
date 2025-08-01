@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts (修正版)
+// src/services/CommandHandler.ts (タイポ修正版)
 
 import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
@@ -67,18 +67,14 @@ export class CommandHandler {
 
             case 'setFollowMode':
                 this.modeManager.setFollowMode(command.mode === 'on', command.targetPlayer || null);
-                if (command.mode === 'on') {
-                    this.taskManager.startDefaultBehavior();
-                } else {
+                if (command.mode === 'off') {
                     this.taskManager.stopCurrentTaskIfItIs('follow');
                 }
                 return `Follow mode is now ${command.mode}.`;
 
             case 'setCombatMode':
                 this.modeManager.setCombatMode(command.mode === 'on');
-                if (command.mode === 'on') {
-                    // 動的タスク生成に任せるので、ここではタスクを追加しない
-                } else {
+                if (command.mode === 'off') {
                     this.taskManager.stopCurrentTaskIfItIs('combat');
                 }
                 return `Combat mode is now ${command.mode}.`;
@@ -93,13 +89,12 @@ export class CommandHandler {
                 const taskStatus = this.taskManager.getStatus();
 
                 let report = `--- Bot Status Report ---\n`;
+                // ★ここを修正: 'full-status' -> 'fullStatus'
                 report += `[Bot Info]\n- Health: ${fullStatus.health}, Food: ${fullStatus.hunger}\n- Position: ${fullStatus.position.toString()}\n`;
                 report += `- Home: ${fullStatus.homePosition ? fullStatus.homePosition.toString() : 'Not set'}\n\n`;
-                
                 report += `[Mode Settings]\n`;
                 report += `- Combat Mode: ${fullStatus.modes.combatMode ? 'ON' : 'OFF'}\n`;
                 report += `- Follow Mode: ${fullStatus.modes.followMode ? `ON (Target: ${fullStatus.modes.followTarget})` : 'OFF'}\n\n`;
-
                 report += `[Task Status]\n`;
                 if (taskStatus.activeTask) {
                     report += `- Active Task: ${taskStatus.activeTask.type} (ID: ${taskStatus.activeTask.taskId})\n`;
@@ -110,7 +105,6 @@ export class CommandHandler {
                 taskStatus.taskQueue.forEach((t, i) => {
                     report += `  ${i+1}. ${t.type} (Priority: ${t.priority})\n`;
                 });
-                
                 return report;
 
             case 'stop':
