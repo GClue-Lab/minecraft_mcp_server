@@ -26,7 +26,7 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
-            const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
+            const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager, chatReporter);
             const modeManager = new ModeManager(chatReporter);
             const taskManager = new TaskManager(); // Planner体制では引数なし
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);

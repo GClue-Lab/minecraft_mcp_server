@@ -9,6 +9,7 @@ import { CombatBehavior } from '../behaviors/combat';
 import { DropItemsBehavior } from '../behaviors/dropItems';
 import { BotManager } from './BotManager';
 import { Task } from '../types/mcp';
+import { ChatReporter } from './ChatReporter'; // ★インポートを追加
 
 // (BehaviorInstanceのインターフェース定義は変更なし)
 
@@ -18,12 +19,14 @@ export class BehaviorEngine extends EventEmitter {
     private botManager: BotManager;
     private activeBehaviorInstance: any | null = null;
     private activeTask: Task | null = null;
+    private chatReporter: ChatReporter; 
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager) {
+    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager, chatReporter: ChatReporter) {
         super();
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.botManager = botManager;
+        this.chatReporter = chatReporter; // ★保持する
     }
     
     public setBotInstance(newBot: mineflayer.Bot): void {
@@ -36,9 +39,10 @@ export class BehaviorEngine extends EventEmitter {
         this.activeTask = task;
         let newBehaviorInstance: any | null = null;
 
+        // ★各Behaviorのインスタンス化時に chatReporter を渡す
         switch (task.type) {
             case 'mine':
-                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, task.arguments);
+                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, this.chatReporter, task.arguments);
                 break;
             case 'follow':
                 newBehaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, task.arguments);

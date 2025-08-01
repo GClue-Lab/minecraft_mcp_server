@@ -11,7 +11,6 @@ export class ChatReporter {
     private bot: mineflayer.Bot | null = null;
 
     constructor(botManager: BotManager) {
-        // BotManagerから 'spawn' イベントを受け取り、botインスタンスを保持する
         botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
             this.bot = bot;
             this.setupHealthListener();
@@ -23,6 +22,16 @@ export class ChatReporter {
             this.bot.chat(message);
         }
     }
+
+    // ★★★★★★★★★★ ここにメソッドを追加 ★★★★★★★★★★
+    /**
+     * エラーメッセージをチャットに報告する
+     * @param errorMessage 報告するエラーの内容
+     */
+    public reportError(errorMessage: string): void {
+        this.chat(`[ERROR] ${errorMessage}`);
+    }
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     public reportTaskStart(task: Task): void {
         let detail = '';
@@ -38,7 +47,6 @@ export class ChatReporter {
         this.chat(`Task End: ${task.type}. Result: ${result}`);
     }
 
-    // ★ここを修正: modeNameに 'Mining' を追加
     public reportModeChange(modeName: 'Combat' | 'Follow' | 'Mining', status: boolean, target?: string | null): void {
         const statusText = status ? 'ON' : 'OFF';
         let detail = '';
@@ -60,7 +68,7 @@ export class ChatReporter {
     private setupHealthListener(): void {
         if (this.bot) {
             this.bot.on('health', () => {
-                if(this.bot) { // 'health'イベント内で再度nullチェック
+                if(this.bot) {
                     this.reportHealthWarning(this.bot.health, this.bot.food);
                 }
             });

@@ -2,6 +2,7 @@
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
+import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
 
@@ -14,13 +15,15 @@ export interface MineBlockOptions {
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
+    private chatReporter: ChatReporter;
     private options: Required<Omit<MineBlockOptions, 'blockName'> & { blockName: string | null }>;
     private isActive: boolean = false;
     private minedCount: number = 0;
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: MineBlockOptions) {
+    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, options: MineBlockOptions) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
+        this.chatReporter = chatReporter;
         this.options = {
             quantity: options.quantity ?? 1,
             maxDistance: options.maxDistance ?? 32,
@@ -92,6 +95,8 @@ export class MineBlockBehavior {
                     await this.bot.dig(targetBlock);
                     this.minedCount++;
                 } catch (err: any) {
+                    const errorMessage = `Digging failed: ${err.message}`;
+                    this.chatReporter.reportError(errorMessage); // チャットに報告
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             } else {
