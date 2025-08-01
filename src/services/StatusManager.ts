@@ -1,4 +1,4 @@
-// src/services/StatusManager.ts (最新版フルコード)
+// src/services/StatusManager.ts (Planner対応版)
 
 import * as mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
@@ -6,40 +6,37 @@ import { BotStatus } from '../types/mcp';
 import { WorldKnowledge } from './WorldKnowledge';
 import { TaskManager } from './TaskManager';
 import { ModeManager } from './ModeManager';
+import { BehaviorEngine } from './BehaviorEngine'; // BehaviorEngineをインポート
 
-/**
- * ボットのあらゆる状態を一元的に集約・管理するクラス。
- * 正確な状況報告の唯一の情報源となる。
- */
 export class StatusManager {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private taskManager: TaskManager;
     private modeManager: ModeManager;
+    private behaviorEngine: BehaviorEngine; // BehaviorEngineへの参照を追加
     private homePosition: Vec3 | null = null;
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, taskManager: TaskManager, modeManager: ModeManager) {
+    constructor(
+        bot: mineflayer.Bot, 
+        worldKnowledge: WorldKnowledge, 
+        taskManager: TaskManager, 
+        modeManager: ModeManager,
+        behaviorEngine: BehaviorEngine // コンストラクタで受け取る
+    ) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.taskManager = taskManager;
         this.modeManager = modeManager;
+        this.behaviorEngine = behaviorEngine; // 参照を保持
     }
 
-    public setHome(position: Vec3): void {
-        this.homePosition = position;
-        console.log(`[StatusManager] Home position set to: ${this.homePosition}`);
-    }
+    public setHome(position: Vec3): void { this.homePosition = position; }
+    public getHome(): Vec3 | null { return this.homePosition; }
 
-    public getHome(): Vec3 | null {
-        return this.homePosition;
-    }
-
-    /**
-     * ボットの現在の全ステータスを収集して返す
-     */
     public getFullStatus(): BotStatus {
-        const activeTaskInfo = this.taskManager.getStatus().activeTask;
-        const modeStatus = this.modeManager.getStatus(); // ModeManagerから最新情報を取得
+        // ★ここを修正: activeTaskをBehaviorEngineから取得
+        const activeTaskInfo = this.behaviorEngine.getActiveTask();
+        const modeStatus = this.modeManager.getStatus();
 
         return {
             health: this.bot.health,
@@ -62,20 +59,14 @@ export class StatusManager {
                 type: activeTaskInfo.type,
                 detail: JSON.stringify(activeTaskInfo.arguments)
             } : null,
-            // ModeManagerから取得したモード情報をステータスに含める
             modes: modeStatus
         };
     }
 
     private getFormattedEquipment(): { [key: string]: string | null } {
-        const equipment: { [key: string]: string | null } = {
-            hand: null, head: null, torso: null, legs: null, feet: null
-        };
+        const equipment: { [key: string]: string | null } = { hand: null, head: null, torso: null, legs: null, feet: null };
         const handItem = this.bot.heldItem;
-        if (handItem) {
-            equipment.hand = handItem.name;
-        }
-        // 他の部位の装備取得は、必要に応じて追加
+        if (handItem) equipment.hand = handItem.name;
         return equipment;
     }
 }

@@ -1,4 +1,4 @@
-// src/main.ts (最新版フルコード)
+// src/main.ts (Planner対応最終版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -8,17 +8,15 @@ import { TaskManager } from './services/TaskManager';
 import { ModeManager } from './services/ModeManager';
 import { StatusManager } from './services/StatusManager';
 import { ChatReporter } from './services/ChatReporter';
-import { BOT_TOOLS_SCHEMA } from './config/toolsSchema'; // 外部ファイルからスキーマをインポート
+import { Planner } from './services/Planner';
+import { BOT_TOOLS_SCHEMA } from './config/toolsSchema';
 import * as mineflayer from 'mineflayer';
 import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
 
 if (process.env.STDIO_MODE === 'true') {
-    console.log = () => {};
-    console.warn = () => {};
-    console.info = () => {};
-    console.debug = () => {};
-    console.error = () => {};
+    console.log = () => {}; console.warn = () => {}; console.info = () => {};
+    console.debug = () => {}; console.error = () => {};
 }
 
 function sendResponse(responseObject: any) {
@@ -32,23 +30,25 @@ async function main() {
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
     
-    // 1. ChatReporterと、中身が空のCommandHandlerを先に生成
     const chatReporter = new ChatReporter(botManager);
     const commandHandler = new CommandHandler(botManager, null, null, null, null);
 
-    // 2. ボットの接続が完了したら、すべてのManagerを生成し、CommandHandlerに依存関係を注入する
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
             const modeManager = new ModeManager(chatReporter);
-            const taskManager = new TaskManager(behaviorEngine, modeManager, botManager, worldKnowledge, chatReporter);
-            const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
+            const taskManager = new TaskManager(); // 引数なしで生成
+            // StatusManagerにBehaviorEngineを渡す
+            const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);
             
-            commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
+            // PlannerをすべてのManagerと連携させて生成
+            const planner = new Planner(behaviorEngine, taskManager, modeManager, worldKnowledge, statusManager);
+            
+            // CommandHandlerに必要なManagerを注入
+            commandHandler.setDependencies(taskManager, modeManager, statusManager, behaviorEngine);
         } else {
-            commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // TODO: 再接続時のインスタンス更新
+            // TODO: 再接続処理
         }
     });
 
@@ -59,32 +59,17 @@ async function main() {
         try {
             const request = JSON.parse(line);
             if (request.jsonrpc === '2.0' && request.method) {
-                // 初期化シーケンス
                 if (request.method === 'initialize') {
-                    sendResponse({
-                        jsonrpc: '2.0',
-                        id: request.id,
-                        result: {
-                            capabilities: {},
-                            protocolVersion: request.params.protocolVersion,
-                            serverInfo: { name: "my-minecraft-bot", version: "2.0.0" }
-                        }
-                    });
+                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {}, protocolVersion: request.params.protocolVersion, serverInfo: { name: "my-minecraft-bot", version: "2.0.0" } } });
                     continue;
                 }
-                if (request.method === 'notifications/initialized') {
-                    continue;
-                }
+                if (request.method === 'notifications/initialized') { continue; }
                 if (request.method === 'tools/list') {
                     sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
                     continue;
                 }
-                
-                // 通常のコマンド呼び出し
                 if (request.method === 'tools/call') {
-                    while (!commandHandler.isReady()) { 
-                        await new Promise(resolve => setTimeout(resolve, 200)); 
-                    }
+                    while (!commandHandler.isReady()) { await new Promise(resolve => setTimeout(resolve, 200)); }
                     
                     const toolName = request.params.name;
                     const args = request.params.arguments;
