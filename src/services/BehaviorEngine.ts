@@ -1,31 +1,22 @@
-// src/services/BehaviorEngine.ts (タスク実行エンジン版)
+// src/services/BehaviorEngine.ts (中断処理改善版)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
 import { WorldKnowledge } from './WorldKnowledge';
-import { FollowPlayerBehavior, FollowPlayerOptions } from '../behaviors/followPlayer';
-import { MineBlockBehavior, MineBlockOptions } from '../behaviors/mineBlock';
-import { CombatBehavior, CombatOptions } from '../behaviors/combat';
-import { DropItemsBehavior, DropItemsOptions } from '../behaviors/dropItems';
+import { FollowPlayerBehavior } from '../behaviors/followPlayer';
+import { MineBlockBehavior } from '../behaviors/mineBlock';
+import { CombatBehavior } from '../behaviors/combat';
+import { DropItemsBehavior } from '../behaviors/dropItems';
 import { BotManager } from './BotManager';
 import { Task } from '../types/mcp';
 
-interface BehaviorInstance {
-    start(): boolean;
-    stop(): void;
-    isRunning(): boolean;
-    getOptions(): any;
-}
+// (BehaviorInstanceのインターフェース定義は変更なし)
 
-/**
- * TaskManagerから指示された単一のタスクを実行することに特化したクラス。
- * 実行結果はイベントとしてTaskManagerに通知する。
- */
 export class BehaviorEngine extends EventEmitter {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private botManager: BotManager;
-    private activeBehaviorInstance: BehaviorInstance | null = null;
+    private activeBehaviorInstance: any | null = null;
     private activeTask: Task | null = null;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, botManager: BotManager) {
@@ -33,40 +24,32 @@ export class BehaviorEngine extends EventEmitter {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.botManager = botManager;
-        console.log('BehaviorEngine (Task-based) initialized.');
     }
     
     public setBotInstance(newBot: mineflayer.Bot): void {
         this.bot = newBot;
-        console.log('BehaviorEngine: Bot instance updated.');
     }
 
     public executeTask(task: Task): boolean {
-        if (this.activeBehaviorInstance) {
-            console.warn('[BehaviorEngine] Another task is already running. Cannot execute new task.');
-            return false;
-        }
+        if (this.activeBehaviorInstance) return false;
 
         this.activeTask = task;
-        let newBehaviorInstance: BehaviorInstance | null = null;
-
-        console.log(`[BehaviorEngine] Executing task: ${task.type} (ID: ${task.taskId})`);
+        let newBehaviorInstance: any | null = null;
 
         switch (task.type) {
             case 'mine':
-                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, task.arguments as MineBlockOptions);
+                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, task.arguments);
                 break;
             case 'follow':
-                newBehaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, task.arguments as FollowPlayerOptions);
+                newBehaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, task.arguments);
                 break;
             case 'combat':
-                newBehaviorInstance = new CombatBehavior(this.bot, this.worldKnowledge, task.arguments as CombatOptions);
+                newBehaviorInstance = new CombatBehavior(this.bot, this.worldKnowledge, task.arguments);
                 break;
             case 'dropItems':
-                newBehaviorInstance = new DropItemsBehavior(this.bot, task.arguments as DropItemsOptions);
+                newBehaviorInstance = new DropItemsBehavior(this.bot, task.arguments);
                 break;
             default:
-                console.error(`[BehaviorEngine] Unknown task type: ${task.type}`);
                 this.emit('taskFailed', this.activeTask, 'Unknown task type');
                 this.activeTask = null;
                 return false;
@@ -79,7 +62,6 @@ export class BehaviorEngine extends EventEmitter {
                 this.monitorBehaviorCompletion(newBehaviorInstance);
                 return true;
             } else {
-                console.error(`[BehaviorEngine] Failed to start behavior for task: ${task.type}`);
                 this.emit('taskFailed', this.activeTask, 'Behavior failed to start');
                 this.activeTask = null;
                 return false;
@@ -88,23 +70,35 @@ export class BehaviorEngine extends EventEmitter {
         return false;
     }
 
+    /**
+     * ★ここから修正: 中断時に即座にイベントを発行する
+     */
     public stopCurrentBehavior(): void {
         if (this.activeBehaviorInstance) {
-            console.log(`[BehaviorEngine] Stopping current behavior for task: ${this.activeTask?.type}`);
+            const stoppedTask = this.activeTask;
             this.activeBehaviorInstance.stop();
+            this.activeBehaviorInstance = null;
+            this.activeTask = null;
+            // 即座にイベントを発行してTaskManagerに通知
+            this.emit('taskFinished', stoppedTask, 'Cancelled by user');
         }
     }
 
-    private monitorBehaviorCompletion(instance: BehaviorInstance): void {
+    /**
+     * ★ここを修正: 監視ロジックを単純化
+     */
+    private monitorBehaviorCompletion(instance: any): void {
         const checkInterval = setInterval(() => {
-            if (!this.activeBehaviorInstance || instance !== this.activeBehaviorInstance) {
+            // 外部から中断された場合、インスタンスがnullになっているので監視を終了
+            if (instance !== this.activeBehaviorInstance) {
                 clearInterval(checkInterval);
                 return;
             }
+
+            // 正常に完了した場合
             if (!instance.isRunning()) {
                 clearInterval(checkInterval);
-                console.log(`[BehaviorEngine] Behavior for task ${this.activeTask?.type} completed.`);
-                this.emit('taskCompleted', this.activeTask, 'Completed successfully');
+                this.emit('taskFinished', this.activeTask, 'Completed successfully');
                 this.activeBehaviorInstance = null;
                 this.activeTask = null;
             }

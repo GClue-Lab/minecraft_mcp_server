@@ -1,4 +1,4 @@
-// src/behaviors/mineBlock.ts (直接制御版)
+// src/behaviors/mineBlock.ts (ロジック改善版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
@@ -60,19 +60,30 @@ export class MineBlockBehavior {
             const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.options.maxDistance);
             
             if (targetBlock) {
-                // ★ここから修正: 移動ロジックを直接制御に
-                const distance = this.bot.entity.position.distanceTo(targetBlock.position);
+                const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
 
-                if (distance > 4) { // 採掘範囲(4ブロック)より遠い場合
+                // ★ここから修正: 距離に応じた判断を追加
+                // 近すぎる場合（真上や真横にいる場合）、少し後ろに下がる
+                if (distance < 1.5) {
+                    this.bot.setControlState('back', true);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    this.bot.setControlState('back', false);
+                    continue; // 再度位置を評価
+                }
+
+                // 遠すぎる場合は、近づく
+                if (distance > 4) {
                     this.bot.lookAt(targetBlock.position, true);
                     this.bot.setControlState('forward', true);
                     this.bot.setControlState('sprint', distance > 6);
                     this.bot.setControlState('jump', this.bot.entity.onGround && targetBlock.position.y > this.bot.entity.position.y);
-                    await new Promise(resolve => setTimeout(resolve, 200)); // 少し待ってループを継続
+                    await new Promise(resolve => setTimeout(resolve, 200));
                     continue;
                 }
-                this.bot.clearControlStates(); // 範囲内に入ったら停止
                 // ★ここまで修正
+
+                // 採掘に適した距離に入ったら、移動を停止
+                this.bot.clearControlStates();
 
                 const bestTool = this.getBestToolFor(targetBlock);
                 if (bestTool) await this.bot.equip(bestTool, 'hand');
@@ -89,7 +100,7 @@ export class MineBlockBehavior {
         }
         this.stop();
     }
-
+    
     private getBestToolFor(block: Block): Item | null {
         const blockName = block.name;
         let toolType = '';
@@ -105,10 +116,7 @@ export class MineBlockBehavior {
         }
 
         const tools = this.bot.inventory.items().filter(item => item.name.endsWith(toolType));
-        if (tools.length === 0) {
-            console.log(`[MineBlock] No tool matching *${toolType} found in inventory.`);
-            return null;
-        }
+        if (tools.length === 0) return null;
 
         const priority = ["netherite", "diamond", "iron", "stone", "wooden", "golden"];
         tools.sort((a, b) => {
@@ -117,7 +125,6 @@ export class MineBlockBehavior {
             return (matA === -1 ? 99 : matA) - (matB === -1 ? 99 : matB);
         });
         
-        console.log(`[MineBlock] Found best tool: ${tools[0].displayName}`);
         return tools[0];
     }
 }

@@ -1,4 +1,4 @@
-// src/services/TaskManager.ts (修正版)
+// src/services/TaskManager.ts (ChatReporter対応版)
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
@@ -28,13 +28,13 @@ export class TaskManager {
         modeManager: ModeManager, 
         botManager: BotManager, 
         worldKnowledge: WorldKnowledge,
-        chatReporter: ChatReporter
+        chatReporter: ChatReporter // 5番目の引数としてChatReporterを受け取る
     ) {
         this.behaviorEngine = behaviorEngine;
         this.modeManager = modeManager;
         this.botManager = botManager;
         this.worldKnowledge = worldKnowledge;
-        this.chatReporter = chatReporter;
+        this.chatReporter = chatReporter; // 参照を保持
         console.log('TaskManager (Chatty & Dynamic) initialized.');
 
         this.behaviorEngine.on('taskCompleted', (task: Task | null, result: any) => this.onTaskFinished(task, result || 'Success'));
