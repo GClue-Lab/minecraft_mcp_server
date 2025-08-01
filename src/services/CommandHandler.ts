@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts (タイポ修正版)
+// src/services/CommandHandler.ts (最新版フルコード)
 
 import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
@@ -8,6 +8,10 @@ import { ModeManager } from './ModeManager';
 import { StatusManager } from './StatusManager';
 import { Vec3 } from 'vec3';
 
+/**
+ * main.tsからコマンドを受け取り、各Managerに処理を振り分ける司令塔。
+ * 古いコマンド体系と新しいアーキテクチャの間の「翻訳者」として機能する。
+ */
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
@@ -89,12 +93,13 @@ export class CommandHandler {
                 const taskStatus = this.taskManager.getStatus();
 
                 let report = `--- Bot Status Report ---\n`;
-                // ★ここを修正: 'full-status' -> 'fullStatus'
                 report += `[Bot Info]\n- Health: ${fullStatus.health}, Food: ${fullStatus.hunger}\n- Position: ${fullStatus.position.toString()}\n`;
                 report += `- Home: ${fullStatus.homePosition ? fullStatus.homePosition.toString() : 'Not set'}\n\n`;
+                
                 report += `[Mode Settings]\n`;
                 report += `- Combat Mode: ${fullStatus.modes.combatMode ? 'ON' : 'OFF'}\n`;
                 report += `- Follow Mode: ${fullStatus.modes.followMode ? `ON (Target: ${fullStatus.modes.followTarget})` : 'OFF'}\n\n`;
+
                 report += `[Task Status]\n`;
                 if (taskStatus.activeTask) {
                     report += `- Active Task: ${taskStatus.activeTask.type} (ID: ${taskStatus.activeTask.taskId})\n`;
@@ -105,6 +110,7 @@ export class CommandHandler {
                 taskStatus.taskQueue.forEach((t, i) => {
                     report += `  ${i+1}. ${t.type} (Priority: ${t.priority})\n`;
                 });
+                
                 return report;
 
             case 'stop':
