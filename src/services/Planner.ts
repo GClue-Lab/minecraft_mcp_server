@@ -1,4 +1,4 @@
-// src/services/Planner.ts (デバッグ報告版)
+// src/services/Planner.ts (デバッグ報告修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -50,9 +50,11 @@ export class Planner {
     private mainLoop(): void {
         const currentTask = this.behaviorEngine.getActiveTask();
         
-        // デバッグ報告
-        const taskName = currentTask ? currentTask.type : 'idle';
-        this.chatReporter.reportError(`[DEBUG] Planner: mainLoop() called. Current state: ${taskName}`);
+        // ★★★★★★★★★★ ここを修正 ★★★★★★★★★★
+        // スパムでキックされるため、このデバッグ報告をコメントアウトします
+        // const taskName = currentTask ? currentTask.type : 'idle';
+        // this.chatReporter.reportError(`[DEBUG] Planner: mainLoop() called. Current state: ${taskName}`);
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         const decidedAction = this.decideNextAction();
 
@@ -85,7 +87,6 @@ export class Planner {
         }
     }
 
-    // decideNextAction, findNearestHostileMob, createAction は変更なし...
     private decideNextAction(): Task | null {
         if (this.modeManager.isCombatMode()) {
             const nearestHostile = this.findNearestHostileMob(10);
