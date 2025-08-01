@@ -1,4 +1,4 @@
-// src/services/Planner.ts (安定版への復元)
+// src/services/Planner.ts (ロジック修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -53,9 +53,15 @@ export class Planner {
 
         if (currentTask) {
             // --- ケース1: ボットが何かタスクを実行中の場合 ---
-            if (decidedAction && decidedAction.priority < currentTask.priority) {
+
+            // ★★★★★★★★★★ ここからが修正点 ★★★★★★★★★★
+            // 以下の2つの場合に、現在のタスクを停止する
+            // 1. 次にやるべきことが何もない場合 (例: followモードがOFFになった)
+            // 2. 次にやるべきことがあり、それが現在のタスクより優先度が高い場合
+            if (!decidedAction || (decidedAction.priority < currentTask.priority)) {
                 this.behaviorEngine.stopCurrentBehavior();
             }
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         } else {
             // --- ケース2: ボットがアイドル状態の場合 ---
