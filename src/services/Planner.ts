@@ -1,4 +1,4 @@
-// src/services/Planner.ts (元の状態に復元)
+// src/services/Planner.ts (集中モード実装版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -33,22 +33,46 @@ export class Planner {
         this.worldKnowledge = worldKnowledge;
         this.statusManager = statusManager;
 
+        // タスク完了時、または中断時に即座に次の行動を評価する
         this.behaviorEngine.on('taskFinished', () => this.mainLoop());
+        // 500msごとにメインループを実行する
         this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
         console.log('Planner initialized. Bot brain is now active.');
     }
 
+    /**
+     * メインの思考ループ。ボットの現在の状態に応じて行動を決定・実行する。
+     */
     private mainLoop(): void {
         const currentTask = this.behaviorEngine.getActiveTask();
+
+        // ★★★★★★★★★★ ここからが新しいロジック ★★★★★★★★★★
+
+        // 【集中モード】現在、採掘タスクを実行中の場合
+        if (currentTask && currentTask.type === 'mine') {
+            // 採掘中は、戦闘による割り込みのみをチェックする
+            const interruptAction = this.checkForCombatInterrupt();
+            if (interruptAction) {
+                console.log(`[Planner] CONCENTRATION INTERRUPT! Combat action has higher priority.`);
+                this.behaviorEngine.stopCurrentBehavior();
+            }
+            // 割り込みがなければ、何もしない。採掘を継続させる。
+            return;
+        }
+
+        // 【通常モード】アイドル状態、または採掘以外のタスクを実行中の場合
         const decidedAction = this.decideNextAction();
 
+        // --- ケース1: 何もすべきことがない ---
         if (!decidedAction) {
+            // もし何か実行中なら（例：追従）、それを止める
             if (currentTask) {
                 this.behaviorEngine.stopCurrentBehavior();
             }
             return;
         }
 
+        // --- ケース2: アイドル状態なので、新しいタスクを開始する ---
         if (!currentTask) {
             let taskToExecute: Task | null = null;
             if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
@@ -65,20 +89,37 @@ export class Planner {
             return;
         }
 
+        // --- ケース3: 実行中のタスクがあり、割り込みを判断する ---
         if (decidedAction.priority < currentTask.priority) {
             console.log(`[Planner] INTERRUPT! New action '${decidedAction.type}' has higher priority.`);
             this.behaviorEngine.stopCurrentBehavior();
         }
     }
-
-    private decideNextAction(): Task | null {
+    
+    /**
+     * 【集中モード用】戦闘による割り込みが発生したかどうかだけをチェックする軽量な思考関数
+     * @returns 実行すべき戦闘タスク、またはnull
+     */
+    private checkForCombatInterrupt(): Task | null {
         if (this.modeManager.isCombatMode()) {
             const nearestHostile = this.findNearestHostileMob(10);
             if (nearestHostile) {
                 return this.createAction('combat', { targetEntityId: nearestHostile.id, attackRange: 4 });
             }
         }
+        return null;
+    }
 
+    /**
+     * 【通常モード用】すべての情報を基に、次に取るべき行動を判断する完全な思考関数
+     * @returns 実行すべきTaskオブジェクト、またはnull
+     */
+    private decideNextAction(): Task | null {
+        // 優先度1: 戦闘
+        const combatAction = this.checkForCombatInterrupt();
+        if (combatAction) return combatAction;
+
+        // 優先度2: 採掘
         if (this.modeManager.isMiningMode()) {
             const miningTask = this.taskManager.peekNextMiningTask();
             if (miningTask) {
@@ -86,10 +127,12 @@ export class Planner {
             }
         }
 
+        // 優先度3: 追従
         if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
             return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
         }
         
+        // 優先度4: 一般タスク
         const generalTask = this.taskManager.peekNextGeneralTask();
         if (generalTask) {
             return generalTask;
