@@ -1,4 +1,4 @@
-// src/behaviors/mineBlock.ts (イベント駆動型・修正版)
+// src/behaviors/mineBlock.ts (素手での採掘対応版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
@@ -32,7 +32,6 @@ export class MineBlockBehavior {
             maxDistance: options.maxDistance ?? 32,
             blockName: options.blockName ?? null,
         };
-        // ★重要: thisを束縛して、イベントハンドラ内でクラスのメンバにアクセスできるようにする
         this.onDiggingCompleted = this.onDiggingCompleted.bind(this);
         this.onDiggingAborted = this.onDiggingAborted.bind(this);
     }
@@ -47,8 +46,8 @@ export class MineBlockBehavior {
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
-        this.removeListeners(); // 停止時にリスナーを必ず削除
-        this.bot.stopDigging(); // 採掘中であれば中断
+        this.removeListeners();
+        this.bot.stopDigging();
         this.bot.clearControlStates();
     }
 
@@ -60,9 +59,6 @@ export class MineBlockBehavior {
         return this.options;
     }
 
-    /**
-     * 次の行動ステップを決定し、実行する
-     */
     private async executeNextStep(): Promise<void> {
         if (!this.isActive || this.minedCount >= this.options.quantity) {
             this.stop();
@@ -94,16 +90,15 @@ export class MineBlockBehavior {
             const safeSpot = this.findSafeAdjacentSpot();
             if (safeSpot) {
                 await this.moveToSafeSpot(safeSpot);
-                this.executeNextStep(); // 移動後、再評価
+                this.executeNextStep();
                 return;
             }
         } else if (distance > this.REACHABLE_DISTANCE) {
             await this.moveToTarget(targetBlock);
-            this.executeNextStep(); // 移動後、再評価
+            this.executeNextStep();
             return;
         }
         
-        // 採掘可能な位置にいる場合
         await this.startDigging(targetBlock);
     }
 
@@ -114,19 +109,31 @@ export class MineBlockBehavior {
     private async startDigging(targetBlock: Block): Promise<void> {
         this.bot.clearControlStates();
         const bestTool = this.getBestToolFor(targetBlock);
-        if (bestTool) await this.bot.equip(bestTool, 'hand');
+
+        // ★★★★★★★★★★ ここからロジックを修正 ★★★★★★★★★★
+        if (bestTool) {
+            // 最適なツールがあれば装備する
+            await this.bot.equip(bestTool, 'hand');
+            this.chatReporter.reportError(`Equipped ${bestTool.name}.`);
+        } else {
+            // 最適なツールがなければ、現在手に持っているアイテムをしまう（素手にする）
+            const heldItem = this.bot.heldItem;
+            if (heldItem) {
+                await this.bot.unequip('hand');
+                this.chatReporter.reportError(`No tool found. Using bare hands.`);
+            }
+        }
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         this.addListeners();
         this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetBlock.position}.`);
-        this.bot.dig(targetBlock); // awaitなしで呼び出す
+        this.bot.dig(targetBlock);
     }
 
     private onDiggingCompleted(block: Block): void {
-        // ターゲットとしていたブロックの採掘が完了したかチェック
         if (this.currentTargetBlock && this.currentTargetBlock.position.equals(block.position)) {
             this.minedCount++;
             this.removeListeners();
-            // 少し待ってから次の行動に移る
             setTimeout(() => this.executeNextStep(), 100);
         }
     }
@@ -149,7 +156,6 @@ export class MineBlockBehavior {
         this.bot.removeListener('diggingAborted', this.onDiggingAborted);
     }
 
-    // --- 移動とツール選択のヘルパーメソッド (内容はほぼ変更なし) ---
     private async moveToTarget(targetBlock: Block): Promise<void> {
         this.bot.lookAt(targetBlock.position, true);
         this.bot.setControlState('forward', true);
@@ -204,6 +210,8 @@ export class MineBlockBehavior {
         } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
             toolType = '_shovel';
         } else {
+            // ★修正: 特定のツールがないブロックでも、nullを返さずに処理を続行させる
+            // この場合、ツール検索は行われず、結果的に素手で掘ることになる
             return null;
         }
 
