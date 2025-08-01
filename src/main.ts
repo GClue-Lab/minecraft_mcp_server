@@ -1,121 +1,80 @@
-// src/main.ts (Planner対応・最新版)
+// src/main.ts (リファクタリング版)
 
 import { BotManager } from './services/BotManager';
-import { CommandHandler } from './services/CommandHandler';
-import { WorldKnowledge } from './services/WorldKnowledge';
-import { BehaviorEngine } from './services/BehaviorEngine';
-import { TaskManager } from './services/TaskManager';
-import { ModeManager } from './services/ModeManager';
-import { StatusManager } from './services/StatusManager';
-import { ChatReporter } from './services/ChatReporter';
-import { Planner } from './services/Planner';
-import { BOT_TOOLS_SCHEMA } from './config/toolsSchema';
-import * as mineflayer from 'mineflayer';
+import { handleInitializationSequence } from './core/initializer'; // 初期化処理をインポート
+import { setupBotSystem } from './core/systemFactory'; // システム構築処理をインポート
 import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
 
+// ログ抑制処理
 if (process.env.STDIO_MODE === 'true') {
-    console.log = () => {};
-    console.warn = () => {};
-    console.info = () => {};
-    console.debug = () => {};
-    console.error = () => {};
+    console.log = () => {}; console.warn = () => {}; console.info = () => {};
+    console.debug = () => {}; console.error = () => {};
 }
 
+// 応答送信関数
 function sendResponse(responseObject: any) {
+    // 応答が空オブジェクトの場合は何も送信しない (initialized通知用)
+    if (Object.keys(responseObject).length === 0) return;
     process.stdout.write(JSON.stringify(responseObject) + '\n');
 }
 
+// メインの非同期関数
 async function main() {
     const MINECRAFT_SERVER_HOST = process.env.MINECRAFT_SERVER_HOST || 'localhost';
     const MINECRAFT_SERVER_PORT = parseInt(process.env.MINECRAFT_SERVER_PORT || '25565', 10);
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
+    // 1. BotManagerを生成
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
     
-    const chatReporter = new ChatReporter(botManager);
-    // CommandHandlerを、中身が空の状態で先にインスタンス化する
-    const commandHandler = new CommandHandler(botManager, null, null, null, null);
+    // 2. システム構築処理を呼び出し、完成済みのCommandHandlerを取得
+    const commandHandler = setupBotSystem(botManager);
 
-    botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
-        // 既に初期化済みなら、botインスタンスを更新するだけ
-        if (commandHandler.isReady()) {
-            // ★ここを修正: CommandHandlerはWorldKnowledgeを直接保持しないため、この行はエラーになる。
-            // Respawn時のインスタンス更新は、より上位のクラスで行う必要があるため、一旦削除。
-            // commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // TODO: 再接続時のより詳細なインスタンス更新処理を実装する
-            return;
-        }
-
-        // 依存関係を解決しながら、各Managerをインスタンス化
-        const worldKnowledge = new WorldKnowledge(bot);
-        const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
-        const modeManager = new ModeManager(chatReporter);
-        const taskManager = new TaskManager(); // Planner体制では引数なし
-        const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);
-        
-        // PlannerをすべてのManagerと連携させて生成
-        const planner = new Planner(behaviorEngine, taskManager, modeManager, worldKnowledge, statusManager);
-        
-        // CommandHandlerに必要なManagerを注入して完成させる
-        commandHandler.setDependencies(taskManager, modeManager, statusManager, behaviorEngine);
-    });
-
+    // 3. サーバーへ接続開始
     botManager.connect().catch(err => { /* 静音モード */ });
 
+    // 4. mcpoからのリクエストを待機するメインループ
     const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
     for await (const line of rl) {
         try {
             const request = JSON.parse(line);
-            if (request.jsonrpc === '2.0' && request.method) {
-                // 初期化シーケンス
-                if (request.method === 'initialize') {
-                    sendResponse({
-                        jsonrpc: '2.0',
-                        id: request.id,
-                        result: {
-                            capabilities: {},
-                            protocolVersion: request.params.protocolVersion,
-                            serverInfo: { name: "my-minecraft-bot", version: "2.0.0" }
-                        }
-                    });
-                    continue;
-                }
-                if (request.method === 'notifications/initialized') {
-                    continue;
-                }
-                if (request.method === 'tools/list') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { tools: BOT_TOOLS_SCHEMA } });
-                    continue;
+            if (!request.jsonrpc || request.jsonrpc !== '2.0') continue;
+
+            // 4a. 初期化シーケンスの処理を委譲
+            const initResponse = handleInitializationSequence(request);
+            if (initResponse) {
+                sendResponse(initResponse);
+                continue;
+            }
+
+            // 4b. 通常のコマンド呼び出し処理
+            if (request.method === 'tools/call') {
+                // ボットの準備が整うまで待機
+                while (!commandHandler.isReady()) { 
+                    await new Promise(resolve => setTimeout(resolve, 200)); 
                 }
                 
-                // 通常のコマンド呼び出し
-                if (request.method === 'tools/call') {
-                    while (!commandHandler.isReady()) { 
-                        await new Promise(resolve => setTimeout(resolve, 200)); 
+                // コマンドの変換と実行
+                const toolName = request.params.name;
+                const args = request.params.arguments;
+                let command: McpCommand | null = null;
+                switch (toolName) {
+                    case 'minecraft_get_status': command = { type: 'getStatus', id: request.id }; break;
+                    case 'minecraft_stop_behavior': command = { type: 'stop', id: request.id }; break;
+                    case 'minecraft_set_mining_mode': command = { type: 'setMiningMode', mode: 'on', ...args, id: request.id }; break;
+                    case 'minecraft_set_follow_mode': command = { type: 'setFollowMode', ...args, id: request.id }; break;
+                    case 'minecraft_set_combat_mode': command = { type: 'setCombatMode', ...args, id: request.id }; break;
+                    case 'minecraft_set_home': command = { type: 'setHome', ...args, id: request.id }; break;
+                }
+                if (command) {
+                    try {
+                        const result = await commandHandler.handleCommand(command);
+                        const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                        sendResponse({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: "text", text: resultString }] } });
+                    } catch (error: any) {
+                        sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
                     }
-                    
-                    const toolName = request.params.name;
-                    const args = request.params.arguments;
-                    let command: McpCommand | null = null;
-                    switch (toolName) {
-                        case 'minecraft_get_status': command = { type: 'getStatus', id: request.id }; break;
-                        case 'minecraft_stop_behavior': command = { type: 'stop', id: request.id }; break;
-                        case 'minecraft_set_mining_mode': command = { type: 'setMiningMode', mode: 'on', ...args, id: request.id }; break;
-                        case 'minecraft_set_follow_mode': command = { type: 'setFollowMode', ...args, id: request.id }; break;
-                        case 'minecraft_set_combat_mode': command = { type: 'setCombatMode', ...args, id: request.id }; break;
-                        case 'minecraft_set_home': command = { type: 'setHome', ...args, id: request.id }; break;
-                    }
-                    if (command) {
-                        try {
-                            const result = await commandHandler.handleCommand(command);
-                            const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-                            sendResponse({ jsonrpc: '2.0', id: request.id, result: { content: [{ type: "text", text: resultString }] } });
-                        } catch (error: any) {
-                            sendResponse({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: error.message } });
-                        }
-                    }
-                    continue;
                 }
             }
         } catch (e) { /* JSONパース失敗などは無視 */ }
