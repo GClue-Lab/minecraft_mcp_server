@@ -1,4 +1,4 @@
-// src/services/Planner.ts (ロジック修正版)
+// src/services/Planner.ts (安定版への復元)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -39,39 +39,26 @@ export class Planner {
 
         this.behaviorEngine.on('taskFinished', () => this.mainLoop());
         
-        // メインの思考ループ
-        this.mainLoopInterval = setInterval(async () => {
-            // ループの最初に、ごく短いスリープを設ける
-            // これにより、mineflayerがイベントを処理するための「隙」が生まれる
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-            // その後、通常の思考ループを実行する
+        // 元のシンプルなsetIntervalに戻す
+        this.mainLoopInterval = setInterval(() => {
             this.mainLoop();
         }, 500);
 
         console.log('Planner initialized. Bot brain is now active.');
     }
 
-    // ★★★★★★★★★★ ここからロジックを全面的に修正 ★★★★★★★★★★
     private mainLoop(): void {
         const currentTask = this.behaviorEngine.getActiveTask();
         const decidedAction = this.decideNextAction();
 
         if (currentTask) {
             // --- ケース1: ボットが何かタスクを実行中の場合 ---
-            
-            // 割り込みをチェックする。
-            // 新しく決定された行動があり、かつその優先度が現在実行中のタスクより高い場合のみ中断する。
             if (decidedAction && decidedAction.priority < currentTask.priority) {
                 this.behaviorEngine.stopCurrentBehavior();
             }
-            // 割り込みがなければ何もしない。現在のタスクを継続させる。
-            // decidedActionがnullでも、currentTaskは中断されない。
 
         } else {
             // --- ケース2: ボットがアイドル状態の場合 ---
-
-            // もし何かすべき行動が決定されたなら、新しいタスクを開始する。
             if (decidedAction) {
                 let taskToExecute: Task | null = null;
                 if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
@@ -86,10 +73,8 @@ export class Planner {
                     this.behaviorEngine.executeTask(taskToExecute);
                 }
             }
-            // 何もすべき行動がなければ（decidedActionがnull）、何もしない。アイドル状態を維持する。
         }
     }
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     private decideNextAction(): Task | null {
         if (this.modeManager.isCombatMode()) {
