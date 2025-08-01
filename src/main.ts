@@ -1,4 +1,4 @@
-// src/main.ts (最新版フルコード)
+// src/main.ts (スキーマ修正版)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -19,14 +19,48 @@ if (process.env.STDIO_MODE === 'true') {
     console.error = () => {};
 }
 
+// ===== ★ここから修正：引数の説明をより詳細にする★ =====
 const BOT_TOOLS_SCHEMA = [
   { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
   { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string" }, "quantity": { "type": "integer" } }, "required": ["blockName", "quantity"] } },
-  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] }, "targetPlayer": { "type": "string" } }, "required": ["mode"] } },
-  { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] } }, "required": ["mode"] } },
+  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string", "description": "採掘するブロックの英語名 (例: oak_log, stone)" }, "quantity": { "type": "integer", "description": "採掘する数量" } }, "required": ["blockName", "quantity"] } },
+  { 
+    "name": "minecraft_set_follow_mode", 
+    "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", 
+    "inputSchema": { 
+      "type": "object", 
+      "properties": { 
+        "mode": { 
+          "type": "string", 
+          "enum": ["on", "off"], 
+          "description": "追従を開始する場合は'on', 停止する場合は'off'を指定します。" 
+        }, 
+        "targetPlayer": { 
+          "type": "string", 
+          "description": "追従を開始する場合に必須の、ターゲットプレイヤー名。" 
+        } 
+      }, 
+      "required": ["mode"] 
+    } 
+  },
+  { 
+    "name": "minecraft_set_combat_mode", 
+    "description": "ボットの戦闘モードを設定する。", 
+    "inputSchema": { 
+      "type": "object", 
+      "properties": { 
+        "mode": { 
+          "type": "string", 
+          "enum": ["on", "off"], 
+          "description": "戦闘モードを有効にする場合は'on', 無効にする場合は'off'を指定します。" 
+        } 
+      }, 
+      "required": ["mode"] 
+    } 
+  },
   { "name": "minecraft_set_home", "description": "ボットの拠点（ホーム）の座標を設定する。", "inputSchema": { "type": "object", "properties": { "position": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }, "required": ["x", "y", "z"] } }, "required": ["position"] } }
 ];
+// ===== ★ここまで修正★ =====
 
 function sendResponse(responseObject: any) {
     process.stdout.write(JSON.stringify(responseObject) + '\n');
@@ -38,30 +72,22 @@ async function main() {
     const BOT_USERNAME = process.env.BOT_USERNAME || 'MCP_Bot';
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
-    
-    // ★ここから新しい初期化ロジック★
-    // 1. すべてのManagerクラスを、botインスタンスなしで先に生成する
-    const modeManager = new ModeManager();
-    // CommandHandlerはまだ不完全な状態で生成
-    const commandHandler = new CommandHandler(botManager, null, null, modeManager, null);
+    const commandHandler = new CommandHandler(botManager, null, null, null, null);
 
-    // 2. 'spawn'イベントを受け取ったら、各Managerにbotインスタンスを注入して完成させる
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
+            const modeManager = new ModeManager();
             const taskManager = new TaskManager(behaviorEngine, modeManager, botManager);
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
             
-            // CommandHandlerを完全な状態にする
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
         } else {
-            // 再接続時の処理
             commandHandler.getWorldKnowledge()?.setBotInstance(bot);
-            // TODO: 他のManagerのインスタンスも更新する
+            // TODO: 再接続時のインスタンス更新
         }
     });
-    // ★ここまで新しい初期化ロジック★
 
     botManager.connect().catch(err => { /* 静音モード */ });
 
@@ -80,9 +106,7 @@ async function main() {
                     continue;
                 }
                 if (request.method === 'tools/call') {
-                    // isReady()で、botインスタンスが注入されるまで待機する
                     while (!commandHandler.isReady()) { await new Promise(resolve => setTimeout(resolve, 100)); }
-                    
                     const toolName = request.params.name;
                     const args = request.params.arguments;
                     let command: McpCommand | null = null;
