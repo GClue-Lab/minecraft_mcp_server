@@ -1,45 +1,44 @@
-// src/services/TaskManager.ts (完全版)
+// src/services/TaskManager.ts (修正版)
 
 import { Task } from '../types/mcp';
 import { BehaviorEngine } from './BehaviorEngine';
 import { ModeManager } from './ModeManager';
 import { BotManager } from './BotManager';
 import { WorldKnowledge } from './WorldKnowledge';
+import { ChatReporter } from './ChatReporter';
 import { WorldEntity } from '../services/WorldKnowledge';
 import { randomUUID } from 'crypto';
 
-// 各タスクのデフォルト優先度を定義
 const TASK_PRIORITIES: { [key in Task['type']]: number } = {
-    'combat': 0,
-    'mine': 10,
-    'dropItems': 12,
-    'goto': 8,
-    'follow': 20,
-    'patrol': 15,
+    'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
 };
 
-/**
- * ボットの「頭脳」として、状況に応じてタスクを動的に生成・管理し、
- * 優先度に基づいた行動決定を行うクラス。
- */
 export class TaskManager {
     private taskQueue: Task[] = [];
     private behaviorEngine: BehaviorEngine;
     private modeManager: ModeManager;
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge;
+    private chatReporter: ChatReporter;
     private activeTask: Task | null = null;
     private mainLoopInterval: NodeJS.Timeout;
 
-    constructor(behaviorEngine: BehaviorEngine, modeManager: ModeManager, botManager: BotManager, worldKnowledge: WorldKnowledge) {
+    constructor(
+        behaviorEngine: BehaviorEngine, 
+        modeManager: ModeManager, 
+        botManager: BotManager, 
+        worldKnowledge: WorldKnowledge,
+        chatReporter: ChatReporter
+    ) {
         this.behaviorEngine = behaviorEngine;
         this.modeManager = modeManager;
         this.botManager = botManager;
         this.worldKnowledge = worldKnowledge;
-        console.log('TaskManager (Robust) initialized.');
+        this.chatReporter = chatReporter;
+        console.log('TaskManager (Chatty & Dynamic) initialized.');
 
-        this.behaviorEngine.on('taskCompleted', (task: Task | null) => this.onTaskFinished(task));
-        this.behaviorEngine.on('taskFailed', (task: Task | null) => this.onTaskFinished(task));
+        this.behaviorEngine.on('taskCompleted', (task: Task | null, result: any) => this.onTaskFinished(task, result || 'Success'));
+        this.behaviorEngine.on('taskFailed', (task: Task | null, reason: any) => this.onTaskFinished(task, reason || 'Failed'));
         
         const eventEmitter = this.botManager.getBotInstanceEventEmitter();
         eventEmitter.on('death', () => this.handleBotDeath());
@@ -48,17 +47,13 @@ export class TaskManager {
         this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
     }
     
-    /**
-     * 500msごとに実行されるメインループ（思考サイクル）。
-     */
     private mainLoop(): void {
         this.generateDynamicTasks();
-        this.tick();
+        if (!this.activeTask) {
+            this.tick();
+        }
     }
 
-    /**
-     * 周囲の状況を監視し、必要に応じてタスクを動的に生成・破棄する。
-     */
     private generateDynamicTasks(): void {
         if (this.modeManager.isCombatMode()) {
             const nearestHostile = this.findNearestHostileMob(10);
@@ -75,31 +70,27 @@ export class TaskManager {
         }
     }
 
-    /**
-     * キューとモード設定に基づき、次に実行すべきタスクを開始する。
-     */
     private tick(): void {
         if (this.activeTask) return;
 
+        let nextTask: Task | null = null;
         if (this.taskQueue.length > 0) {
-            this.activeTask = this.taskQueue.shift()!;
-            this.activeTask.status = 'running';
-            this.behaviorEngine.executeTask(this.activeTask);
-            return;
+            nextTask = this.taskQueue.shift()!;
+        } else if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+            nextTask = this.createDefaultTask('follow', { targetPlayer: this.modeManager.getFollowTarget() });
         }
-        
-        if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
-            this.activeTask = this.createDefaultTask('follow', { targetPlayer: this.modeManager.getFollowTarget() });
+
+        if (nextTask) {
+            this.activeTask = nextTask;
+            this.activeTask.status = 'running';
+            this.chatReporter.reportTaskStart(this.activeTask);
             this.behaviorEngine.executeTask(this.activeTask);
-            return;
         }
     }
     
-    /**
-     * BehaviorEngineからタスクの終了通知を受け取った際の処理。
-     */
-    private onTaskFinished(task: Task | null): void {
+    private onTaskFinished(task: Task | null, result: string): void {
         if (task && this.activeTask && task.taskId === this.activeTask.taskId) {
+            this.chatReporter.reportTaskEnd(task, result);
             this.activeTask = null;
             this.tick();
         }
@@ -115,9 +106,6 @@ export class TaskManager {
         this.tick();
     }
 
-    /**
-     * 外部から新しいタスクをキューに追加する。
-     */
     public addTask(type: Task['type'], args: any, priority?: number): string {
         const newTask: Task = {
             taskId: randomUUID(), type, arguments: args, status: 'pending',
@@ -133,14 +121,10 @@ export class TaskManager {
         
         this.taskQueue.push(newTask);
         this.taskQueue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
-
         this.tick();
         return newTask.taskId;
     }
 
-    /**
-     * 指定されたIDのタスクをキャンセルする。
-     */
     public cancelTask(taskId: string): void {
         if (this.activeTask && this.activeTask.taskId === taskId) {
             this.behaviorEngine.stopCurrentBehavior();
@@ -149,18 +133,12 @@ export class TaskManager {
         }
     }
 
-    /**
-     * 現在実行中のタスクを停止する。
-     */
     public stopCurrentTask(): void {
         if (this.activeTask) {
             this.cancelTask(this.activeTask.taskId);
         }
     }
 
-    /**
-     * 現在のタスクが指定されたタイプの場合のみ停止する。
-     */
     public stopCurrentTaskIfItIs(type: Task['type']): void {
         if (this.activeTask && this.activeTask.type === type) {
             this.stopCurrentTask();
@@ -189,15 +167,11 @@ export class TaskManager {
 
     private createDefaultTask(type: Task['type'], args: any): Task {
         return {
-            taskId: `default-${type}`,
-            type: type,
-            arguments: args,
-            status: 'running',
-            priority: TASK_PRIORITIES[type],
-            createdAt: Date.now()
+            taskId: `default-${type}`, type, arguments: args, status: 'running',
+            priority: TASK_PRIORITIES[type], createdAt: Date.now()
         };
     }
-
+    
     public getStatus() {
         return {
             activeTask: this.activeTask,

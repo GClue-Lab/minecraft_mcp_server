@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts (最新版フルコード)
+// src/services/CommandHandler.ts (修正版)
 
 import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
@@ -8,10 +8,6 @@ import { ModeManager } from './ModeManager';
 import { StatusManager } from './StatusManager';
 import { Vec3 } from 'vec3';
 
-/**
- * main.tsからコマンドを受け取り、各Managerに処理を振り分ける司令塔。
- * 古いコマンド体系と新しいアーキテクチャの間の「翻訳者」として機能する。
- */
 export class CommandHandler {
     private botManager: BotManager;
     private worldKnowledge: WorldKnowledge | null = null;
