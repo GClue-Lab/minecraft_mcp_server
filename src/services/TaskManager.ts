@@ -27,7 +27,7 @@ class TaskQueue {
     public peek(): Task | null {
         const task = this.tasks.length > 0 ? this.tasks[0] : null;
         const taskName = task ? task.type : 'null';
-        if (taskName != null) {
+        if (taskName != 'null') {
             this.chatReporter?.reportError(`[DEBUG] TaskQueue (${this.queueName}): Peeking task. Found: ${taskName}.`);
         }
         return task;
