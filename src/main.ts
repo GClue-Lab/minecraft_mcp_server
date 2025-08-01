@@ -1,4 +1,4 @@
-// src/main.ts (ChatReporter対応版)
+// src/main.ts (最新版フルコード)
 
 import { BotManager } from './services/BotManager';
 import { CommandHandler } from './services/CommandHandler';
@@ -8,6 +8,7 @@ import { TaskManager } from './services/TaskManager';
 import { ModeManager } from './services/ModeManager';
 import { StatusManager } from './services/StatusManager';
 import { ChatReporter } from './services/ChatReporter';
+import { BOT_TOOLS_SCHEMA } from './config/toolsSchema'; // 外部ファイルからスキーマをインポート
 import * as mineflayer from 'mineflayer';
 import { McpCommand } from './types/mcp';
 import { createInterface } from 'node:readline/promises';
@@ -20,15 +21,6 @@ if (process.env.STDIO_MODE === 'true') {
     console.error = () => {};
 }
 
-const BOT_TOOLS_SCHEMA = [
-  { "name": "minecraft_get_status", "description": "ボットの現在の状態を取得する。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_stop_behavior", "description": "ボットの現在の行動を停止させる。", "inputSchema": { "type": "object", "properties": {}, "required": [] } },
-  { "name": "minecraft_set_mining_mode", "description": "ボットに特定のブロックを指定した数量だけ採掘させる。", "inputSchema": { "type": "object", "properties": { "blockName": { "type": "string" }, "quantity": { "type": "integer" } }, "required": ["blockName", "quantity"] } },
-  { "name": "minecraft_set_follow_mode", "description": "ボットに特定のプレイヤーを追従させる、または追従を停止させる。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] }, "targetPlayer": { "type": "string" } }, "required": ["mode"] } },
-  { "name": "minecraft_set_combat_mode", "description": "ボットの戦闘モードを設定する。", "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["on", "off"] } }, "required": ["mode"] } },
-  { "name": "minecraft_set_home", "description": "ボットの拠点（ホーム）の座標を設定する。", "inputSchema": { "type": "object", "properties": { "position": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } }, "required": ["x", "y", "z"] } }, "required": ["position"] } }
-];
-
 function sendResponse(responseObject: any) {
     process.stdout.write(JSON.stringify(responseObject) + '\n');
 }
@@ -40,11 +32,11 @@ async function main() {
 
     const botManager = new BotManager(BOT_USERNAME, MINECRAFT_SERVER_HOST, MINECRAFT_SERVER_PORT);
     
-    // ChatReporterと、中身が空のCommandHandlerを先に生成
+    // 1. ChatReporterと、中身が空のCommandHandlerを先に生成
     const chatReporter = new ChatReporter(botManager);
     const commandHandler = new CommandHandler(botManager, null, null, null, null);
 
-    // ボットの接続が完了したら、すべての依存関係を解決して注入する
+    // 2. ボットの接続が完了したら、すべてのManagerを生成し、CommandHandlerに依存関係を注入する
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
@@ -69,7 +61,15 @@ async function main() {
             if (request.jsonrpc === '2.0' && request.method) {
                 // 初期化シーケンス
                 if (request.method === 'initialize') {
-                    sendResponse({ jsonrpc: '2.0', id: request.id, result: { capabilities: {}, protocolVersion: request.params.protocolVersion, serverInfo: { name: "my-minecraft-bot", version: "2.0.0" } } });
+                    sendResponse({
+                        jsonrpc: '2.0',
+                        id: request.id,
+                        result: {
+                            capabilities: {},
+                            protocolVersion: request.params.protocolVersion,
+                            serverInfo: { name: "my-minecraft-bot", version: "2.0.0" }
+                        }
+                    });
                     continue;
                 }
                 if (request.method === 'notifications/initialized') {
