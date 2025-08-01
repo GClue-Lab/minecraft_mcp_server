@@ -128,6 +128,8 @@ export class MineBlockBehavior {
         this.addListeners();
         this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetBlock.position}.`);
         this.bot.dig(targetBlock);
+        // sleep 100ms
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     private onDiggingCompleted(block: Block): void {
