@@ -1,4 +1,4 @@
-// src/services/Planner.ts (修正後・マルチキュー対応版)
+// src/services/Planner.ts (デッドロック修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -18,7 +18,9 @@ export class Planner {
     private modeManager: ModeManager;
     private worldKnowledge: WorldKnowledge;
     private statusManager: StatusManager;
-    private mainLoopInterval: NodeJS.Timeout;
+    
+    // ★修正1: mainLoopIntervalをidleCheckIntervalに改名し、null許容にする
+    private idleCheckInterval: NodeJS.Timeout | null = null;
 
     constructor(
         behaviorEngine: BehaviorEngine,
@@ -33,49 +35,91 @@ export class Planner {
         this.worldKnowledge = worldKnowledge;
         this.statusManager = statusManager;
 
-        this.behaviorEngine.on('taskFinished', () => this.mainLoop());
-        this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
+        // ★修正2: イベントハンドラのロジックを更新
+        // タスクが完了したら、即座に次の行動を評価し、その後アイドル状態の監視を再開する
+        this.behaviorEngine.on('taskFinished', () => {
+            console.log('[Planner] Task finished. Re-evaluating next action immediately.');
+            this.mainLoop();
+            this.startIdleCheck();
+        });
+
+        // 最初にアイドル状態の監視を開始する
+        this.startIdleCheck();
         console.log('Planner initialized. Bot brain is now active.');
     }
 
-    private mainLoop(): void {
-        const currentTask = this.behaviorEngine.getActiveTask();
-        const decidedAction = this.decideNextAction();
-
-        if (!decidedAction) {
-            if (currentTask) {
-                this.behaviorEngine.stopCurrentBehavior();
+    /**
+     * ★修正3: アイドル時の思考ループを開始するメソッド
+     */
+    private startIdleCheck(): void {
+        // すでに実行中なら何もしない
+        if (this.idleCheckInterval) return;
+        
+        console.log('[Planner] Starting idle check loop.');
+        this.idleCheckInterval = setInterval(() => {
+            // ボットが何もしていない（タスクがない）場合のみ、思考ループを実行
+            if (!this.behaviorEngine.getActiveTask()) {
+                this.mainLoop();
             }
-            return;
-        }
+        }, 1000); // 処理の衝突を避けるため、間隔を1秒に延長
+    }
 
-        if (!currentTask) {
-            // ★ここから修正: 複数のキューからタスクを取り出すロジック
-            let taskToExecute: Task | null = null;
-            if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
-                taskToExecute = this.taskManager.getNextMiningTask();
-            } else if (this.taskManager.peekNextGeneralTask()?.taskId === decidedAction.taskId) {
-                taskToExecute = this.taskManager.getNextGeneralTask();
-            } else {
-                taskToExecute = decidedAction; // Plannerが動的に生成したタスク
-            }
-            
-            if (taskToExecute) {
-                this.behaviorEngine.executeTask(taskToExecute);
-            }
-            // ★ここまで修正
-            return;
-        }
-
-        if (decidedAction.priority < currentTask.priority) {
-            console.log(`[Planner] INTERRUPT! New action '${decidedAction.type}' has higher priority.`);
-            this.behaviorEngine.stopCurrentBehavior();
+    /**
+     * ★修正4: アイドル時の思考ループを停止するメソッド
+     */
+    private stopIdleCheck(): void {
+        if (this.idleCheckInterval) {
+            console.log('[Planner] Stopping idle check loop.');
+            clearInterval(this.idleCheckInterval);
+            this.idleCheckInterval = null;
         }
     }
 
-    // ★ここから修正: 意思決定の優先順位を全面的に更新
+    /**
+     * ★修正5: メインの思考ロジックを更新
+     */
+    private mainLoop(): void {
+        // ボットが現在何かしている場合は、新たな思考を開始しない
+        // (ただし、割り込みは除く)
+        const currentTask = this.behaviorEngine.getActiveTask();
+        if (currentTask) {
+             const decidedAction = this.decideNextAction();
+             // 割り込み判定: より優先度の高い行動があれば現在のタスクを中断
+             if (decidedAction && decidedAction.priority < currentTask.priority) {
+                 console.log(`[Planner] INTERRUPT! New action '${decidedAction.type}' has higher priority.`);
+                 this.stopIdleCheck(); // 割り込み時もループを止める（taskFinishedで再開されるため）
+                 this.behaviorEngine.stopCurrentBehavior();
+             }
+             return;
+        }
+
+        // --- ボットがアイドル状態の場合の処理 ---
+        const decidedAction = this.decideNextAction();
+
+        if (!decidedAction) {
+            return; // 何もすることがない
+        }
+
+        let taskToExecute: Task | null = null;
+        if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
+            taskToExecute = this.taskManager.getNextMiningTask();
+        } else if (this.taskManager.peekNextGeneralTask()?.taskId === decidedAction.taskId) {
+            taskToExecute = this.taskManager.getNextGeneralTask();
+        } else {
+            taskToExecute = decidedAction;
+        }
+        
+        if (taskToExecute) {
+            const started = this.behaviorEngine.executeTask(taskToExecute);
+            // ★最重要★: タスクが開始されたら、アイドルチェックを停止する
+            if (started) {
+                this.stopIdleCheck();
+            }
+        }
+    }
+
     private decideNextAction(): Task | null {
-        // 優先度1: 戦闘モードONで敵がいるか？
+        // (この関数の内容は変更なし)
         if (this.modeManager.isCombatMode()) {
             const nearestHostile = this.findNearestHostileMob(10);
             if (nearestHostile) {
@@ -83,7 +127,6 @@ export class Planner {
             }
         }
 
-        // 優先度2: 採掘モードONで採掘タスクがあるか？
         if (this.modeManager.isMiningMode()) {
             const miningTask = this.taskManager.peekNextMiningTask();
             if (miningTask) {
@@ -91,21 +134,17 @@ export class Planner {
             }
         }
 
-        // 優先度3: 追従モードがONか？
         if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
             return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
         }
         
-        // 優先度4: 一般タスクは残っているか？
         const generalTask = this.taskManager.peekNextGeneralTask();
         if (generalTask) {
             return generalTask;
         }
 
-        // 優先度5: 何もすることがない
         return null;
     }
-    // ★ここまで修正
 
     private findNearestHostileMob(range: number): WorldEntity | null {
         // (この関数の内容は変更なし)
