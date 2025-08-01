@@ -17,6 +17,7 @@
     "express": "^5.1.0",
     "minecraft-data": "^3.93.0",
     "mineflayer": "^4.30.0",
+    "mineflayer-pathfinder": "^2.4.5",
     "prismarine-block": "^1.21.0",
     "prismarine-entity": "^2.5.0"
   },

@@ -1,10 +1,10 @@
-// src/behaviors/mineBlock.ts v1.15 (完全版)
+// src/behaviors/mineBlock.ts (Pathfinder使用版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { BehaviorName } from '../types/mcp';
+import { goals } from 'mineflayer-pathfinder'; // PathfinderのGoalをインポート
 
 export interface MineBlockOptions {
     blockId?: number | null;
@@ -13,121 +13,84 @@ export interface MineBlockOptions {
     maxDistance?: number;
 }
 
-type InternalMineBlockOptions = {
-    blockId: number | null;
-    blockName: string | null;
-    quantity: number;
-    maxDistance: number;
-}
-
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
-    private options: InternalMineBlockOptions;
+    private options: Required<Omit<MineBlockOptions, 'blockId' | 'blockName'> & { blockId: number | null, blockName: string | null }>;
     private isActive: boolean = false;
-    private isPaused: boolean = false;
     private minedCount: number = 0;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, options: MineBlockOptions) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
-
         this.options = {
             quantity: options.quantity ?? 1,
             maxDistance: options.maxDistance ?? 32,
             blockId: options.blockId ?? null,
             blockName: options.blockName ?? null,
         };
-
-        if (this.options.blockId === null && this.options.blockName === null) {
-            throw new Error('MineBlockBehavior requires either blockId or blockName option.');
-        }
-
-        console.log(`[MineBlock] Initialized for target: ${this.options.blockName || `ID:${this.options.blockId}`} (quantity: ${this.options.quantity})`);
     }
 
     public start(): boolean {
-        if (this.isActive) {
-            console.warn('[MineBlock] Behavior is already active.');
-            return false;
-        }
+        if (this.isActive) return false;
         this.isActive = true;
-        this.isPaused = false;
-        this.minedCount = 0;
-        console.log(`[MineBlock] Starting for ${this.options.blockName || `ID:${this.options.blockId}`}...`);
         this.executeMineLogic();
         return true;
     }
 
     public stop(): void {
         if (!this.isActive) return;
-        console.log(`[MineBlock] Stopping behavior.`);
         this.isActive = false;
-        this.isPaused = false;
+        // @ts-ignore
+        this.bot.pathfinder.stop(); // Pathfinderの移動をキャンセル
         this.bot.clearControlStates();
     }
 
     public isRunning(): boolean {
-        return this.isActive && !this.isPaused;
-    }
-
-    public pause(): void {
-        if (!this.isActive || this.isPaused) return;
-        console.log(`[MineBlock] Pausing.`);
-        this.isPaused = true;
-        this.bot.clearControlStates();
-    }
-
-    public resume(): void {
-        if (!this.isActive || !this.isPaused) return;
-        console.log(`[MineBlock] Resuming.`);
-        this.isPaused = false;
-        this.executeMineLogic();
-    }
-
-    public canBeInterruptedBy(higherPriorityBehavior: BehaviorName): boolean {
-        return higherPriorityBehavior === 'combat';
+        return this.isActive;
     }
 
     public getOptions(): MineBlockOptions {
-        return {
-            blockId: this.options.blockId,
-            blockName: this.options.blockName,
-            quantity: this.options.quantity,
-            maxDistance: this.options.maxDistance,
-        };
+        return this.options;
     }
 
     private async executeMineLogic(): Promise<void> {
-        while (this.isActive && !this.isPaused && this.minedCount < this.options.quantity) {
+        while (this.isActive && this.minedCount < this.options.quantity) {
             const blockIdsToFind = this.getBlockIdsToFind();
             if (!blockIdsToFind) break;
 
             const targetBlock = this.worldKnowledge.findNearestBlock(blockIdsToFind, this.options.maxDistance);
             
             if (targetBlock) {
-                if (this.bot.entity.position.distanceTo(targetBlock.position) > 3.5) {
-                    this.bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5), true);
-                    this.bot.setControlState('forward', true);
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                // ★ここから修正: 原始的な移動をPathfinderに置き換え
+                console.log(`[MineBlock] Target block found at ${targetBlock.position}. Moving...`);
+                
+                if (!this.bot.canDigBlock(targetBlock)) {
+                    console.error(`[MineBlock] Cannot dig this block: ${targetBlock.name}. Finding another one.`);
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 少し待って再検索
                     continue;
                 }
-                this.bot.clearControlStates();
-                
+
+                try {
+                    // ブロックから4ブロック以内の地点をゴールに設定
+                    const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 4);
+                    // @ts-ignore
+                    await this.bot.pathfinder.goto(goal);
+                } catch (err: any) {
+                    console.error(`[MineBlock] Pathfinder could not find a path: ${err.message}. Finding another block.`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    continue;
+                }
+                // ★ここまで修正
+
                 const bestTool = this.getBestToolFor(targetBlock);
                 if (bestTool) {
                     await this.bot.equip(bestTool, 'hand');
                 }
                 
                 try {
-                    console.log(`[MineBlock] Digging ${targetBlock.displayName}...`);
-                    const diggingTimeout = 15000;
-                    const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Digging timed out')), diggingTimeout)
-                    );
-                    
-                    await Promise.race([this.bot.dig(targetBlock), timeoutPromise]);
-                    
+                    console.log(`[MineBlock] In range. Digging ${targetBlock.displayName}...`);
+                    await this.bot.dig(targetBlock);
                     this.minedCount++;
                     console.log(`[MineBlock] Mined count: ${this.minedCount}/${this.options.quantity}`);
                 } catch (err: any) {
@@ -136,16 +99,13 @@ export class MineBlockBehavior {
                 }
 
             } else {
-                console.log(`[MineBlock] No '${this.options.blockName}' found within ${this.options.maxDistance} blocks. Waiting...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log(`[MineBlock] No '${this.options.blockName}' found. Waiting...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
-
-            if (!this.isActive) break;
         }
-        console.log('[MineBlock] Mining task loop finished.');
         this.stop();
     }
-    
+
     private getBlockIdsToFind(): number[] | null {
         if (this.options.blockId) return [this.options.blockId];
         if (this.options.blockName) {

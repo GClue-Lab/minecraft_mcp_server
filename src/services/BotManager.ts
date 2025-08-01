@@ -1,62 +1,42 @@
-// src/services/BotManager.ts v1.3
+// src/services/BotManager.ts (Pathfinder修正版)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
+import { pathfinder, Movements } from 'mineflayer-pathfinder';
 
-/**
- * ボットの現在の状態を表す型
- */
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
-/**
- * Mineflayerボットのライフサイクルを管理するクラス
- */
 export class BotManager {
     private bot: mineflayer.Bot | null = null;
     private status: BotStatus = 'disconnected';
     private reconnectTimeout: NodeJS.Timeout | null = null;
-    private readonly RECONNECT_DELAY_MS = 5000; // 5秒後に再接続を試みる
-    private botInstanceEventEmitter: EventEmitter; // 追加: ボットインスタンスのイベントを通知
+    private readonly RECONNECT_DELAY_MS = 5000;
+    private botInstanceEventEmitter: EventEmitter;
 
     constructor(
         private username: string,
         private host: string,
         private port: number
     ) {
-        this.botInstanceEventEmitter = new EventEmitter(); // 初期化
+        this.botInstanceEventEmitter = new EventEmitter();
         console.log(`BotManager initialized for ${username}@${host}:${port}`);
     }
 
-    /**
-     * ボットの現在の状態を取得します。
-     * @returns ボットの状態
-     */
     public getStatus(): BotStatus {
         return this.status;
     }
 
-    /**
-     * Mineflayerボットのインスタンスを取得します。
-     * @returns Mineflayer Botインスタンス、またはnull
-     */
     public getBot(): mineflayer.Bot | null {
         return this.bot;
     }
 
-    /**
-     * ボットインスタンスに関するイベントを購読するためのEventEmitterを取得します。
-     * 'spawn' イベントでボットインスタンスを渡します。
-     */
     public getBotInstanceEventEmitter(): EventEmitter {
         return this.botInstanceEventEmitter;
     }
 
-    /**
-     * Minecraftサーバーにボットを接続します。
-     */
     public async connect(): Promise<void> {
         if (this.status === 'connecting' || this.status === 'connected') {
-            console.warn('Bot is already connecting or connected. Skipping new connection attempt.');
+            console.warn('Bot is already connecting or connected.');
             return;
         }
 
@@ -68,66 +48,62 @@ export class BotManager {
                 host: this.host,
                 port: this.port,
                 username: this.username,
-                // version: '1.18.2' // 特定のバージョンを指定する場合
             });
+
+            this.bot.loadPlugin(pathfinder);
 
             this.setupBotListeners();
 
             await new Promise<void>((resolve, reject) => {
                 if (!this.bot) return reject(new Error("Bot not initialized"));
+
                 this.bot.once('spawn', () => {
+                    // ★ここを修正: Movementsのコンストラクタ引数をbotのみにする
+                    // @ts-ignore
+                    const defaultMove = new Movements(this.bot);
+                    // @ts-ignore
+                    this.bot.pathfinder.setMovements(defaultMove);
+
                     this.setStatus('connected');
                     console.log(`Bot ${this.username} connected and spawned!`);
-                    this.botInstanceEventEmitter.emit('spawn', this.bot); // 'spawn'イベントを発行
+                    this.botInstanceEventEmitter.emit('spawn', this.bot);
                     resolve();
                 });
+
                 this.bot.once('error', (err) => {
-                    console.error(`Connection error during initial connect: ${err.message}`);
                     this.setStatus('error');
-                    this.cleanupBot(); // エラー時はボットをクリーンアップ
+                    this.cleanupBot();
                     reject(err);
                 });
                 this.bot.once('end', (reason) => {
-                    console.warn(`Connection ended during initial connect: ${reason}`);
                     this.setStatus('disconnected');
-                    this.cleanupBot(); // 終了時はボットをクリーンアップ
+                    this.cleanupBot();
                     reject(new Error(`Connection ended: ${reason}`));
                 });
             });
 
         } catch (error) {
-            console.error(`Failed to create bot instance: ${error}`);
             this.setStatus('error');
-            this.scheduleReconnect(); // インスタンス作成失敗時も再接続を試みる
+            this.scheduleReconnect();
             throw error;
         }
     }
 
-    /**
-     * ボットを切断します。
-     */
     public disconnect(): void {
         if (this.bot && this.status === 'connected') {
-            console.log(`Disconnecting bot ${this.username}...`);
             this.bot.end('Manual disconnect');
             this.cleanupBot();
             this.setStatus('disconnected');
-        } else {
-            console.log('Bot is not connected or already disconnected.');
         }
     }
 
-    /**
-     * ボットのイベントリスナーを設定します。
-     * これにより、通信遮断やエラーを検出し、自動再接続を試みます。
-     */
     private setupBotListeners(): void {
         if (!this.bot) return;
 
         this.bot.on('end', (reason) => {
             console.warn(`Bot disconnected! Reason: ${reason}`);
             this.setStatus('disconnected');
-            this.cleanupBot(); // 'end' イベントで必ずクリーンアップ
+            this.cleanupBot();
             this.scheduleReconnect();
         });
 
@@ -138,13 +114,12 @@ export class BotManager {
         this.bot.on('error', (err) => {
             console.error(`Bot error: ${err.message}`);
             this.setStatus('error');
-            this.bot?.end('Error occurred'); // 強制的に切断し、endイベントをトリガー
+            this.bot?.end('Error occurred');
         });
 
         this.bot.on('spawn', () => {
             if (this.status !== 'connected') {
                 this.setStatus('connected');
-                console.log(`Bot ${this.username} re-spawned and reconnected!`);
                 if (this.reconnectTimeout) {
                     clearTimeout(this.reconnectTimeout);
                     this.reconnectTimeout = null;
@@ -153,25 +128,19 @@ export class BotManager {
             }
         });
 
-        // --- ボットの死亡/リスポーンイベントを追加 ---
         this.bot.on('death', () => {
-            console.log('Bot died!');
-            this.botInstanceEventEmitter.emit('death'); // 死亡イベントを通知
+            this.botInstanceEventEmitter.emit('death');
         });
 
         this.bot.on('respawn', () => {
-            console.log('Bot respawned!');
-            this.botInstanceEventEmitter.emit('respawn'); // リスポーンイベントを通知
+            this.botInstanceEventEmitter.emit('respawn');
         });
-        // --- End ボットの死亡/リスポーンイベント ---
-
-        // mineflayer-pathfinder 関連イベントリスナーは削除済み
     }
 
     private cleanupBot(): void {
         if (this.bot) {
             this.bot.removeAllListeners();
-            this.bot = null; // ボットインスタンスをnullにする
+            this.bot = null;
         }
         if (this.reconnectTimeout) {
             clearTimeout(this.reconnectTimeout);
@@ -181,18 +150,13 @@ export class BotManager {
 
     private scheduleReconnect(): void {
         if (this.reconnectTimeout) {
-            console.warn('Reconnect already scheduled.');
             return;
         }
-
-        console.log(`Scheduling reconnect in ${this.RECONNECT_DELAY_MS / 1000} seconds...`);
         this.setStatus('reconnecting');
         this.reconnectTimeout = setTimeout(async () => {
-            console.log('Attempting to reconnect...');
             try {
                 await this.connect();
             } catch (error) {
-                console.error(`Reconnect failed: ${error}`);
                 this.scheduleReconnect();
             }
         }, this.RECONNECT_DELAY_MS);
@@ -200,7 +164,6 @@ export class BotManager {
 
     private setStatus(newStatus: BotStatus): void {
         if (this.status !== newStatus) {
-            console.log(`Bot Status changed: ${this.status} -> ${newStatus}`);
             this.status = newStatus;
         }
     }
