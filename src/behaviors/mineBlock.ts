@@ -1,4 +1,4 @@
-// src/behaviors/mineBlock.ts (距離報告デバッグ版)
+// src/behaviors/mineBlock.ts (精密採掘・報告強化版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
@@ -20,6 +20,7 @@ export class MineBlockBehavior {
     private options: Required<Omit<MineBlockOptions, 'blockName'> & { blockName: string | null }>;
     private isActive: boolean = false;
     private minedCount: number = 0;
+    private readonly REACHABLE_DISTANCE = 4.0; // ボットが移動せずに掘れる最大距離
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, options: MineBlockOptions) {
         this.bot = bot;
@@ -63,63 +64,70 @@ export class MineBlockBehavior {
 
             const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.options.maxDistance);
             
-            if (targetBlock) {
-                // ★★★★★★★★★★ ここからデバッグ用のチャット報告を追加 ★★★★★★★★★★
-                const distance = this.bot.entity.position.distanceTo(targetBlock.position);
-                const targetPos = targetBlock.position;
-                // reportErrorを流用して、目立つようにチャットで報告させます
-                this.chatReporter.reportError(
-                    `Found target ${this.options.blockName} at (${targetPos.x}, ${targetPos.y}, ${targetPos.z}). Distance: ${distance.toFixed(2)}`
-                );
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-                const botPos = this.bot.entity.position;
-                const isTargetAtFeet = targetBlock.position.equals(botPos.floored());
-
-                if (isTargetAtFeet) {
-                    const safeSpot = this.findSafeAdjacentSpot();
-                    if (safeSpot) {
-                        await this.moveToSafeSpot(safeSpot);
-                        continue;
-                    }
-                }
-
-                if (distance > 4) {
-                    this.bot.lookAt(targetBlock.position, true);
-                    this.bot.setControlState('forward', true);
-                    this.bot.setControlState('sprint', distance > 6);
-                    this.bot.setControlState('jump', this.bot.entity.onGround && targetBlock.position.y > this.bot.entity.position.y);
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    continue;
-                }
-                
-                if (distance < 1.5 && !isTargetAtFeet) {
-                    this.bot.setControlState('back', true);
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    this.bot.setControlState('back', false);
-                    continue;
-                }
-
-                this.bot.clearControlStates();
-
-                const bestTool = this.getBestToolFor(targetBlock);
-                if (bestTool) await this.bot.equip(bestTool, 'hand');
-                
-                try {
-                    await this.bot.dig(targetBlock);
-                    this.minedCount++;
-                } catch (err: any) {
-                    const errorMessage = `Digging failed: ${err.message}`;
-                    this.chatReporter.reportError(errorMessage);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            } else {
-                this.chatReporter.reportError(`Could not find any more ${this.options.blockName}.`);
+            if (!targetBlock) {
+                this.chatReporter.reportError(`Could not find any more ${this.options.blockName}. Stopping task.`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 break;
             }
+
+            const botPos = this.bot.entity.position;
+            const targetPos = targetBlock.position;
+            const distance = botPos.distanceTo(targetPos);
+
+            // ターゲットが足元にあるか判定
+            const isTargetAtFeet = targetPos.equals(botPos.floored());
+
+            // --- 行動決定ロジック ---
+            if (isTargetAtFeet) {
+                // 1. ターゲットが足元にある場合
+                const safeSpot = this.findSafeAdjacentSpot();
+                if (safeSpot) {
+                    this.chatReporter.reportError("Target is at my feet. Moving to a safe spot first.");
+                    await this.moveToSafeSpot(safeSpot);
+                    this.chatReporter.reportError("Finished positioning.");
+                    continue; // 移動後、次のループで状況を再評価
+                }
+                // 安全な場所がなければ、そのまま掘るフェーズへ
+            } else if (distance > this.REACHABLE_DISTANCE) {
+                // 2. ターゲットが採掘可能距離より遠い場合
+                this.chatReporter.reportError(`Target is too far (${distance.toFixed(2)}m). Moving to ${targetPos}.`);
+                await this.moveToTarget(targetBlock);
+                this.chatReporter.reportError("Finished moving.");
+                continue; // 移動後、次のループで状況を再評価
+            }
+            
+            // 3. ターゲットが採掘可能距離にある場合（または足元で安全な場所がない場合）
+            this.bot.clearControlStates();
+            const bestTool = this.getBestToolFor(targetBlock);
+            if (bestTool) await this.bot.equip(bestTool, 'hand');
+            
+            try {
+                this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetPos}.`);
+                await this.bot.dig(targetBlock);
+                this.minedCount++;
+            } catch (err: any) {
+                const errorMessage = `Digging failed: ${err.message}`;
+                this.chatReporter.reportError(errorMessage);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
         this.stop();
+    }
+
+    /**
+     * ターゲットブロックに近づくための汎用的な移動処理
+     * @param targetBlock 移動先のブロック
+     */
+    private async moveToTarget(targetBlock: Block): Promise<void> {
+        this.bot.lookAt(targetBlock.position, true);
+        this.bot.setControlState('forward', true);
+        
+        const distance = this.bot.entity.position.distanceTo(targetBlock.position);
+        this.bot.setControlState('sprint', distance > 6);
+        this.bot.setControlState('jump', this.bot.entity.onGround && targetBlock.position.y > this.bot.entity.position.y);
+        
+        // 200msだけ移動して、次のループで再評価
+        await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     private findSafeAdjacentSpot(): Vec3 | null {
@@ -146,13 +154,11 @@ export class MineBlockBehavior {
                 return spot;
             }
         }
-
         return null;
     }
 
     private async moveToSafeSpot(destination: Vec3): Promise<void> {
         this.bot.lookAt(destination.offset(0.5, 0, 0.5), true);
-        
         this.bot.setControlState('forward', true);
         await new Promise(resolve => setTimeout(resolve, 400));
         this.bot.clearControlStates();
