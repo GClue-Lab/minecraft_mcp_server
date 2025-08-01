@@ -14,20 +14,19 @@ import * as mineflayer from 'mineflayer';
 export function setupBotSystem(botManager: BotManager): CommandHandler {
     
     const chatReporter = new ChatReporter(botManager);
-    const commandHandler = new CommandHandler(botManager, null, null, null, null);
+    // ★★★★★★★★★★ ここを修正 ★★★★★★★★★★
+    const commandHandler = new CommandHandler(botManager, null, null, null, null, chatReporter);
 
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager, chatReporter);
             const modeManager = new ModeManager(chatReporter);
-            const taskManager = new TaskManager();
+            // ★★★★★★★★★★ ここを修正 ★★★★★★★★★★
+            const taskManager = new TaskManager(chatReporter);
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);
             
-            // ★★★★★★★★★★ ここを修正 ★★★★★★★★★★
-            // Plannerのコンストラクタに chatReporter を渡す
             const planner = new Planner(behaviorEngine, taskManager, modeManager, worldKnowledge, statusManager, chatReporter);
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
             
             commandHandler.setDependencies(taskManager, modeManager, statusManager, behaviorEngine);
         } else {

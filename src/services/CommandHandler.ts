@@ -1,4 +1,4 @@
-// src/services/CommandHandler.ts (修正後)
+// src/services/CommandHandler.ts (デバッグ報告版)
 
 import { McpCommand } from '../types/mcp';
 import { BotManager } from './BotManager';
@@ -7,6 +7,7 @@ import { ModeManager } from './ModeManager';
 import { StatusManager } from './StatusManager';
 import { BehaviorEngine } from './BehaviorEngine';
 import { Vec3 } from 'vec3';
+import { ChatReporter } from './ChatReporter'; // ChatReporterをインポート
 
 export class CommandHandler {
     private botManager: BotManager;
@@ -14,19 +15,22 @@ export class CommandHandler {
     private modeManager: ModeManager | null = null;
     private statusManager: StatusManager | null = null;
     private behaviorEngine: BehaviorEngine | null = null;
+    private chatReporter: ChatReporter; // chatReporterプロパティを追加
 
     constructor(
         botManager: BotManager, 
         taskManager: TaskManager | null, 
         modeManager: ModeManager | null, 
         statusManager: StatusManager | null,
-        behaviorEngine: BehaviorEngine | null
+        behaviorEngine: BehaviorEngine | null,
+        chatReporter: ChatReporter // コンストラクタで受け取る
     ) {
         this.botManager = botManager;
         this.taskManager = taskManager;
         this.modeManager = modeManager;
         this.statusManager = statusManager;
         this.behaviorEngine = behaviorEngine;
+        this.chatReporter = chatReporter; // 保持する
     }
 
     public isReady(): boolean {
@@ -51,13 +55,14 @@ export class CommandHandler {
         }
         
         switch (command.type) {
-            // ★ここから修正: setMiningMode のロジックを全面的に書き換え
             case 'setMiningMode':
+                this.chatReporter.reportError(`[DEBUG] CommandHandler: Received 'setMiningMode' command with mode '${command.mode}'.`);
                 if (command.mode === 'on') {
                     if (!command.blockName || !command.quantity) {
                         throw new Error("blockName and quantity are required to turn mining mode on.");
                     }
                     this.modeManager.setMiningMode(true);
+                    this.chatReporter.reportError(`[DEBUG] CommandHandler: Calling taskManager.addMiningTask...`);
                     this.taskManager.addMiningTask('mine', { 
                         blockName: command.blockName, 
                         quantity: command.quantity 
@@ -65,7 +70,6 @@ export class CommandHandler {
                     
                     const home = this.statusManager.getHome();
                     if (home) {
-                        // 採掘後のアイテムドロップタスクは一般キューに追加
                         this.taskManager.addGeneralTask('dropItems', { position: home });
                     }
                     return `Mining mode ON. Task queued to mine ${command.quantity} of ${command.blockName}.`;
@@ -83,6 +87,7 @@ export class CommandHandler {
                     throw new Error("Mode ('on' or 'off') is required for setMiningMode.");
                 }
 
+            // 他のコマンドは変更なし
             case 'setFollowMode':
                 this.modeManager.setFollowMode(command.mode === 'on', command.targetPlayer || null);
                 return `Follow mode is now ${command.mode}.`;
@@ -106,7 +111,6 @@ export class CommandHandler {
                 report += `[Mode Settings]\n`;
                 report += `- Combat Mode: ${fullStatus.modes.combatMode ? 'ON' : 'OFF'}\n`;
                 report += `- Follow Mode: ${fullStatus.modes.followMode ? `ON (Target: ${fullStatus.modes.followTarget})` : 'OFF'}\n`;
-                // ★ここを修正: miningModeの状態をレポートに追加
                 report += `- Mining Mode: ${fullStatus.modes.miningMode ? 'ON' : 'OFF'}\n\n`;
                 report += `[Task Status]\n`;
                 if (fullStatus.currentTask) {
@@ -114,7 +118,6 @@ export class CommandHandler {
                 } else {
                     report += `- Active Task: None (Idle)\n`;
                 }
-                // ★ここを修正: 複数のキューの内容をレポート
                 report += `- Queued Mining Tasks: ${taskStatus.miningQueue.length}\n`;
                 taskStatus.miningQueue.forEach((t, i) => {
                     report += `  ${i+1}. ${t.type} (Priority: ${t.priority})\n`;
