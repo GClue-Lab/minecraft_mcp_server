@@ -1,4 +1,4 @@
-// src/services/ChatReporter.ts (新規作成)
+// src/services/ChatReporter.ts (修正後)
 
 import * as mineflayer from 'mineflayer';
 import { BotManager } from './BotManager';
@@ -38,7 +38,8 @@ export class ChatReporter {
         this.chat(`Task End: ${task.type}. Result: ${result}`);
     }
 
-    public reportModeChange(modeName: 'Combat' | 'Follow', status: boolean, target?: string | null): void {
+    // ★ここを修正: modeNameに 'Mining' を追加
+    public reportModeChange(modeName: 'Combat' | 'Follow' | 'Mining', status: boolean, target?: string | null): void {
         const statusText = status ? 'ON' : 'OFF';
         let detail = '';
         if (modeName === 'Follow' && status && target) {

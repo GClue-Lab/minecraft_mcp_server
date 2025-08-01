@@ -1,4 +1,4 @@
-// src/types/mcp.d.ts (修正版)
+// src/types/mcp.d.ts (修正後)
 
 import { Vec3 } from 'vec3';
 
@@ -10,6 +10,7 @@ export interface CurrentBehavior {
     target?: any;
 }
 
+// McpCommandのtypeにsetMiningModeを追加し、その内容を更新
 export interface McpCommand {
     type: 'setMiningMode' | 'setFollowMode' | 'setCombatMode' | 'getStatus' | 'stop' | 'setHome';
     id: number;
@@ -42,10 +43,11 @@ export interface BotStatus {
     inventory: { name: string, count: number, type: number }[];
     nearbyEntities: { name: string, type: string, distance: number }[];
     currentTask: { taskId: string, type: string, detail: string } | null;
-    // ★ここを追加: モードの状態を格納するプロパティ
+    // ★ここを修正: miningModeを追加
     modes: {
         combatMode: boolean;
         followMode: boolean;
         followTarget: string | null;
+        miningMode: boolean;
     };
 }

@@ -1,4 +1,4 @@
-// src/config/toolsSchema.ts (説明強化版)
+// src/config/toolsSchema.ts (修正後)
 
 /**
  * mcpoに提供するツールの定義（スキーマ）。
@@ -16,16 +16,22 @@ export const BOT_TOOLS_SCHEMA = [
     "description": "ボットが現在実行しているすべての行動（採掘、追従、戦闘など）を即座に中断させ、待機状態に戻します。", 
     "inputSchema": { "type": "object", "properties": {}, "required": [] } 
   },
+  // ★ここを修正: 採掘モードのON/OFFを制御する形式に変更
   { 
     "name": "minecraft_set_mining_mode", 
-    "description": "ボットに、指定されたブロックを指定された数量だけ採掘するタスクをキューに追加させます。", 
+    "description": "指定されたブロックを採掘する「採掘モード」のON/OFFを設定します。", 
     "inputSchema": { 
       "type": "object", 
       "properties": { 
-        "blockName": { "type": "string", "description": "採掘対象のブロックの英語名です。例: 'stone', 'oak_log', 'sand'" }, 
-        "quantity": { "type": "integer", "description": "採掘するブロックの個数です。" } 
+        "mode": { 
+          "type": "string", 
+          "enum": ["on", "off"], 
+          "description": "モードを有効にする場合は'on'を、無効にする場合は'off'を指定してください。" 
+        },
+        "blockName": { "type": "string", "description": "採掘モードを'on'にする場合に必須となる、採掘対象のブロックの英語名です。例: 'stone', 'oak_log'" }, 
+        "quantity": { "type": "integer", "description": "採掘モードを'on'にする場合に必須となる、採掘するブロックの個数です。" } 
       }, 
-      "required": ["blockName", "quantity"] 
+      "required": ["mode"] 
     } 
   },
   { 
