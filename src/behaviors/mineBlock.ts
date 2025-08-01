@@ -132,7 +132,7 @@ export class MineBlockBehavior {
         // dig()の直後に、mineflayerに1ゲームティック分のイベント処理を強制させる
         // これにより、採掘開始パケットの送信を確実に行うための「隙」を作る
         try {
-            await this.bot.waitForTicks(1);
+            await this.bot.waitForTicks(10);
         } catch (err) {
             // waitForTicksが中断された場合など (エラーは無視して良い)
         }
