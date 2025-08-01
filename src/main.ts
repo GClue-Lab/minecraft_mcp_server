@@ -79,7 +79,7 @@ async function main() {
             const worldKnowledge = new WorldKnowledge(bot);
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager);
             const modeManager = new ModeManager();
-            const taskManager = new TaskManager(behaviorEngine, modeManager, botManager);
+            const taskManager = new TaskManager(behaviorEngine, modeManager, botManager, worldKnowledge);
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager);
             
             commandHandler.setDependencies(worldKnowledge, taskManager, modeManager, statusManager);
