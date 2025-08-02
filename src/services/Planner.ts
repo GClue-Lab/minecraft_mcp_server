@@ -1,4 +1,4 @@
-// src/services/Planner.ts (ロジック修正版)
+// src/services/Planner.ts (モード優先指向・修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -12,6 +12,17 @@ import { ChatReporter } from './ChatReporter';
 const ACTION_PRIORITIES: { [key in Task['type']]: number } = {
     'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
 };
+
+// ★★★★★★★★★★ ここからが新しい設計 ★★★★★★★★★★
+// 思考の優先順位を定義。この配列の順番を変更するだけで、ボットの行動優先度を安全に変更できる。
+type ModeType = 'COMBAT' | 'MINING' | 'FOLLOW' | 'GENERAL';
+const MODE_PRIORITY_ORDER: ModeType[] = [
+    'COMBAT',
+    'MINING',
+    'FOLLOW',
+    'GENERAL'
+];
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 export class Planner {
     private behaviorEngine: BehaviorEngine;
@@ -46,42 +57,32 @@ export class Planner {
         console.log('Planner initialized. Bot brain is now active.');
     }
 
+    /**
+     * メインの思考ループ。
+     * 「理想の行動」と「現在の行動」を比較し、状態を遷移させる。
+     */
     private mainLoop(): void {
+        const idealAction = this.decideNextAction();
         const currentTask = this.behaviorEngine.getActiveTask();
-        const decidedAction = this.decideNextAction();
 
         if (currentTask) {
             // --- ケース1: ボットが何かタスクを実行中の場合 ---
-
-            // ★★★★★★★★★★ ここからが修正点 ★★★★★★★★★★
-            // タスクがキューから来たものか、モードによって生成されたものかを判断
-            const isFromQueue = currentTask.type === 'mine' || currentTask.type === 'dropItems' || currentTask.type === 'goto';
-
-            if (isFromQueue) {
-                // タスクがキューから来た場合、高優先度の割り込みがない限り継続する
-                // decidedActionがnullでも、タスクは中断されない
-                if (decidedAction && decidedAction.priority < currentTask.priority) {
-                    this.behaviorEngine.stopCurrentBehavior();
-                }
-            } else {
-                // タスクがモードによるものの場合（follow, combatなど）、
-                // 続ける理由がなくなったか、高優先度の割り込みがあれば停止する
-                if (!decidedAction || (decidedAction.priority < currentTask.priority)) {
-                    this.behaviorEngine.stopCurrentBehavior();
-                }
+            if (!idealAction || idealAction.type !== currentTask.type) {
+                this.behaviorEngine.stopCurrentBehavior();
             }
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         } else {
             // --- ケース2: ボットがアイドル状態の場合 ---
-            if (decidedAction) {
+            if (idealAction) {
                 let taskToExecute: Task | null = null;
-                if (this.taskManager.peekNextMiningTask()?.taskId === decidedAction.taskId) {
-                    taskToExecute = this.taskManager.getNextMiningTask();
-                } else if (this.taskManager.peekNextGeneralTask()?.taskId === decidedAction.taskId) {
-                    taskToExecute = this.taskManager.getNextGeneralTask();
+                if (idealAction.taskId.startsWith('planner-')) {
+                    taskToExecute = idealAction;
                 } else {
-                    taskToExecute = decidedAction;
+                    if (this.taskManager.peekNextMiningTask()?.taskId === idealAction.taskId) {
+                        taskToExecute = this.taskManager.getNextMiningTask();
+                    } else if (this.taskManager.peekNextGeneralTask()?.taskId === idealAction.taskId) {
+                        taskToExecute = this.taskManager.getNextGeneralTask();
+                    }
                 }
                 
                 if (taskToExecute) {
@@ -91,30 +92,52 @@ export class Planner {
         }
     }
 
+    /**
+     * モードの優先順位に従って、今やるべき最も理想的な行動を一つだけ決定する。
+     * @returns 実行すべきTaskオブジェクト、またはnull
+     */
     private decideNextAction(): Task | null {
-        if (this.modeManager.isCombatMode()) {
-            const nearestHostile = this.findNearestHostileMob(10);
-            if (nearestHostile) {
-                return this.createAction('combat', { targetEntityId: nearestHostile.id, attackRange: 4 });
+        // ★★★★★★★★★★ ここからが新しい設計 ★★★★★★★★★★
+        // 定義された優先順位リストを順番にチェックする
+        for (const mode of MODE_PRIORITY_ORDER) {
+            let task: Task | null = null;
+
+            switch (mode) {
+                case 'COMBAT':
+                    if (this.modeManager.isCombatMode()) {
+                        const nearestHostile = this.findNearestHostileMob(10);
+                        if (nearestHostile) {
+                            task = this.createAction('combat', { targetEntityId: nearestHostile.id, attackRange: 4 });
+                        }
+                    }
+                    break;
+                
+                case 'MINING':
+                    if (this.modeManager.isMiningMode()) {
+                        task = this.taskManager.peekNextMiningTask();
+                    }
+                    break;
+
+                case 'FOLLOW':
+                    if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+                        task = this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
+                    }
+                    break;
+                
+                case 'GENERAL':
+                    task = this.taskManager.peekNextGeneralTask();
+                    break;
+            }
+
+            // もし、いずれかのモードでやるべきタスクが見つかったら、
+            // それが最優先事項なので、すぐに思考を終了してそのタスクを返す。
+            if (task) {
+                return task;
             }
         }
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-        if (this.modeManager.isMiningMode()) {
-            const miningTask = this.taskManager.peekNextMiningTask();
-            if (miningTask) {
-                return miningTask;
-            }
-        }
-
-        if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
-            return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
-        }
-        
-        const generalTask = this.taskManager.peekNextGeneralTask();
-        if (generalTask) {
-            return generalTask;
-        }
-
+        // すべてのモードをチェックしても、やるべきことは何もなかった
         return null;
     }
 
