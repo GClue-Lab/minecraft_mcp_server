@@ -13,7 +13,8 @@ export class MineBlockBehavior {
     private chatReporter: ChatReporter;
     private task: Task; // ★オプションの代わりに、タスクオブジェクト全体を保持する
     private isActive: boolean = false;
-    private readonly REACHABLE_DISTANCE = 4.0;
+    private readonly MAX_REACHABLE_DISTANCE = 4.0;
+    private readonly MIN_REACHABLE_DISTANCE = 1.5; // ★ 修正: 最適な距離の下限を定義
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
         this.bot = bot;
@@ -68,16 +69,24 @@ export class MineBlockBehavior {
             return;
         }
 
-        const distance = this.bot.entity.position.distanceTo(targetBlock.position);
-
-        if (distance > this.REACHABLE_DISTANCE) {
+        const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
+        // ケース1：ブロックから遠すぎる場合
+        if (distance > this.MAX_REACHABLE_DISTANCE) {
+            this.chatReporter.reportError(`[DEBUG] Too far from block (${distance.toFixed(2)}m). Moving closer.`);
             await this.moveToTarget(targetBlock);
-            // 移動後、再度次のステップを評価する
-            this.executeNextStep();
+            this.executeNextStep(); // 移動後に再評価
             return;
         }
-        
-        // 採掘可能な位置にいれば、採掘を開始
+
+        // ケース2：ブロックに近すぎる（真上や隣にいる）場合
+        if (distance < this.MIN_REACHABLE_DISTANCE) {
+            this.chatReporter.reportError(`[DEBUG] Too close to block (${distance.toFixed(2)}m). Backing up.`);
+            await this.backUp();
+            this.executeNextStep(); // 後退後に再評価
+            return;
+        }
+
+        // ケース3：最適な距離にいる場合
         this.startDigging(targetBlock);
     }
 
@@ -111,6 +120,12 @@ export class MineBlockBehavior {
         this.bot.clearControlStates();
     }
     
+    private async backUp(): Promise<void> {
+        this.bot.setControlState('back', true);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        this.bot.clearControlStates();
+    }
+
     private async equipBestTool(block: Block): Promise<void> {
         const bestTool = this.getBestToolFor(block);
         if (bestTool) {
