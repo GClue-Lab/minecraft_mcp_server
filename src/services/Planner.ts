@@ -83,6 +83,7 @@ export class Planner {
      */
     private determineIdealAction(): Task | null {
         const currentAction = this.behaviorEngine.getActiveTask();
+        console.log(`[DEBUG] Planner: Determining ideal action. Current task is: ${currentAction?.type || 'none'}`);
 
         // 最優先事項：戦闘
         if (this.modeManager.isCombatMode()) {

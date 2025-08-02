@@ -61,6 +61,7 @@ export class TaskManager {
     // ★ 修正: addMiningTaskのシグネチャを変更
     public addMiningTask(args: any, priority?: number): string {
         const newTask = this.createTask('mine', args, priority);
+        console.log(`[DEBUG] TaskManager: Task added to mining queue. ID: ${newTask.taskId}, Name: ${newTask.arguments.blockName}`);
         this.miningQueue.add(newTask);
         return newTask.taskId;
     }
