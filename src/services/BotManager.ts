@@ -34,6 +34,7 @@ export class BotManager {
                 host: this.host,
                 port: this.port,
                 username: this.username,
+                version: '1.21.4',
             });
 
             this.bot.loadPlugin(pathfinder);
