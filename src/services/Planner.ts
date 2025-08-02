@@ -1,5 +1,3 @@
-// src/services/Planner.ts (FOLLOWモードのロジックを実装した修正版)
-
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
 import { ModeManager } from './ModeManager';
@@ -12,7 +10,7 @@ import { ChatReporter } from './ChatReporter';
 const ACTION_PRIORITIES: { [key in Task['type']]: number } = {
     'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
 };
-const MODE_PRIORITY_ORDER: string[] = ['COMBAT', 'MINING', 'FOLLOW', 'GENERAL'];
+const MODE_PRIORITY_ORDER: string[] = ['MINING', 'FOLLOW', 'GENERAL']; // ★戦闘は別途処理するため、ここからは外す
 
 export class Planner {
     private behaviorEngine: BehaviorEngine;
@@ -39,7 +37,8 @@ export class Planner {
         this.chatReporter = chatReporter;
 
         this.behaviorEngine.on('taskFinished', (finishedTask: Task, reason: string) => {
-            if (reason === 'Completed successfully') {
+            // プランナーが即時生成したタスク(戦闘など)でなければ、完了時にキューから削除
+            if (!finishedTask.taskId.startsWith('planner-') && reason === 'Completed successfully') {
                 this.taskManager.removeTask(finishedTask.taskId);
             }
             this.mainLoop();
@@ -49,60 +48,93 @@ export class Planner {
         console.log('Planner initialized. Bot brain is now active.');
     }
 
+    /**
+     * メインの思考ループ。
+     */
     private mainLoop(): void {
-        const idealTask = this.findIdealTask();
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ ステップ1: 最優先事項である「戦闘」をチェック ★
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        if (this.modeManager.isCombatMode()) {
+            const nearestHostile = this.findNearestHostileMob(10);
+            if (nearestHostile) {
+                const combatTask = this.createAction('combat', { targetEntityId: nearestHostile.id });
+                const currentTask = this.behaviorEngine.getActiveTask();
+
+                // 既に同じ敵と戦闘中なら、何もしないで継続
+                if (currentTask && currentTask.type === 'combat' && currentTask.arguments.targetEntityId === nearestHostile.id) {
+                    return;
+                }
+
+                // 何か他の作業中、またはアイドル状態なら、即座に中断して戦闘を開始
+                if (currentTask) {
+                    this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
+                }
+                this.startTask(combatTask);
+                return; // 戦闘が最優先なので、ここで思考を終了
+            }
+        }
+        
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ ステップ2: 戦闘がない場合、通常のタスク処理を実行 ★
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         const currentTask = this.behaviorEngine.getActiveTask();
+        const nextTaskInQueue = this.findNextTaskInQueue();
 
         if (currentTask) {
-            if (!idealTask) {
+            // --- ケース1: ボットが何かタスクを実行中の場合 ---
+            if (!this.isTaskStillValid(currentTask)) {
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'cancel' });
-            } else if (idealTask.taskId !== currentTask.taskId) {
-                //this.chatReporter.reportError(`[DEBUG] Planner: Interrupting ${currentTask.type} for ${idealTask.type}.`);
+                return;
+            }
+            if (nextTaskInQueue && nextTaskInQueue.priority < currentTask.priority) {
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
-                this.startTask(idealTask);
+                this.startTask(nextTaskInQueue);
+                return;
             }
         } else {
-            if (idealTask) {
-                this.startTask(idealTask);
+            // --- ケース2: ボットがアイドル状態の場合 ---
+            if (nextTaskInQueue) {
+                this.startTask(nextTaskInQueue);
             }
         }
     }
     
     private startTask(task: Task): void {
-        this.taskManager.setTaskStatus(task.taskId, 'running');
+        // キューにあるタスクの場合のみステータスを更新
+        if (!task.taskId.startsWith('planner-')) {
+            this.taskManager.setTaskStatus(task.taskId, 'running');
+        }
         this.behaviorEngine.executeTask(task);
     }
 
-    private findIdealTask(): Task | null {
+    private findNextTaskInQueue(): Task | null {
         for (const mode of MODE_PRIORITY_ORDER) {
-            let task: Task | null = null;
-            switch (mode) {
-                case 'COMBAT':
-                    if (this.modeManager.isCombatMode()) {
-                        const nearestHostile = this.findNearestHostileMob(10);
-                        if (nearestHostile) {
-                            task = this.createAction('combat', { targetEntityId: nearestHostile.id });
-                        }
-                    }
-                    break;
-                case 'MINING':
-                    if (this.modeManager.isMiningMode()) {
-                        task = this.taskManager.findNextPendingMiningTask();
-                    }
-                    break;
-                case 'FOLLOW':
-                    // ★ 修正: FOLLOWモードのタスク生成ロジックを実装
-                    if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
-                        task = this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
-                    }
-                    break;
-                case 'GENERAL':
-                    task = this.taskManager.findNextPendingGeneralTask();
-                    break;
+            if (mode === 'MINING' && this.modeManager.isMiningMode()) {
+                const task = this.taskManager.findNextPendingMiningTask();
+                if (task) return task;
             }
-            if (task) return task;
+            if (mode === 'FOLLOW' && this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+                // フォローは即時実行タスクとして生成
+                return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
+            }
+            if (mode === 'GENERAL') {
+                const task = this.taskManager.findNextPendingGeneralTask();
+                if (task) return task;
+            }
         }
         return null;
+    }
+    
+    private isTaskStillValid(task: Task): boolean {
+        switch (task.type) {
+            case 'mine':
+                return this.modeManager.isMiningMode();
+            case 'follow':
+                return this.modeManager.isFollowMode();
+            default:
+                return true;
+        }
     }
 
     private findNearestHostileMob(range: number): WorldEntity | null {
