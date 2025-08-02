@@ -1,195 +1,183 @@
-// src/behaviors/mineBlock.ts (新設計・タスクオブジェクト参照版)
+import { BehaviorEngine } from './BehaviorEngine';
+import { TaskManager } from './TaskManager';
+import { ModeManager } from './ModeManager';
+import { WorldKnowledge } from './WorldKnowledge';
+import { StatusManager } from './StatusManager';
+import { Task } from '../types/mcp';
+import { WorldEntity } from './WorldKnowledge';
+import { ChatReporter } from './ChatReporter';
 
-import * as mineflayer from 'mineflayer';
-import { WorldKnowledge } from '../services/WorldKnowledge';
-import { ChatReporter } from '../services/ChatReporter';
-import { Block } from 'prismarine-block';
-import { Item } from 'prismarine-item';
-import { goals } from 'mineflayer-pathfinder'; // ★ インポートを追加
-import { Task } from '../types/mcp'; // ★Task型をインポート
+// ボットが即時生成するタスクの優先度
+const ACTION_PRIORITIES: { [key in Task['type']]: number } = {
+    'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
+};
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 移動ロジック切り替えフラグ ★
-// true: mineflayer-pathfinderを使用 / false: 自作の簡易移動を使用
-const USE_PATHFINDER = true; 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// モードの優先順位
+const MODE_PRIORITY_ORDER: string[] = ['MINING', 'FOLLOW', 'GENERAL'];
 
-export class MineBlockBehavior {
-    private bot: mineflayer.Bot;
+export class Planner {
+    private behaviorEngine: BehaviorEngine;
+    private taskManager: TaskManager;
+    private modeManager: ModeManager;
     private worldKnowledge: WorldKnowledge;
+    private statusManager: StatusManager;
     private chatReporter: ChatReporter;
-    private task: Task; // ★オプションの代わりに、タスクオブジェクト全体を保持する
-    private isActive: boolean = false;
-    private readonly MAX_REACHABLE_DISTANCE = 4.0;
-    private readonly MIN_REACHABLE_DISTANCE = 1.5; // ★ 修正: 最適な距離の下限を定義
+    private mainLoopInterval: NodeJS.Timeout;
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
-        this.bot = bot;
+    constructor(
+        behaviorEngine: BehaviorEngine,
+        taskManager: TaskManager,
+        modeManager: ModeManager,
+        worldKnowledge: WorldKnowledge,
+        statusManager: StatusManager,
+        chatReporter: ChatReporter
+    ) {
+        this.behaviorEngine = behaviorEngine;
+        this.taskManager = taskManager;
+        this.modeManager = modeManager;
         this.worldKnowledge = worldKnowledge;
+        this.statusManager = statusManager;
         this.chatReporter = chatReporter;
-        this.task = task; // ★渡されたタスクを保持
-        
-        // 引数のデフォルト値を設定
-        this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
-        this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
-    }
 
-    public start(): boolean {
-        if (this.isActive) return false;
-        this.isActive = true;
-        this.executeNextStep();
-        return true;
-    }
-
-    public stop(): void {
-        if (!this.isActive) return;
-        this.isActive = false;
-        (this.bot as any).pathfinder.stop(); // pathfinderの移動も停止
-        this.bot.stopDigging();
-        this.bot.clearControlStates();
-    }
-
-    public isRunning(): boolean {
-        return this.isActive;
-    }
-
-    private async executeNextStep(): Promise<void> {
-        // ★ 修正: タスクオブジェクトの残り数量を確認
-        if (!this.isActive || this.task.arguments.quantity <= 0) {
-            this.isActive = false; // 完了したら非アクティブ化
-            return;
-        }
-        
-        const blockName = this.task.arguments.blockName;
-        const blockId = blockName ? this.bot.registry.blocksByName[blockName]?.id : null;
-
-        if (!blockId) {
-            this.chatReporter.reportError(`Unknown block name: ${blockName}`);
-            this.isActive = false;
-            return;
-        }
-
-        const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
-        
-        if (!targetBlock) {
-            this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
-            this.isActive = false;
-            return;
-        }
-
-        const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
-        // ケース1：ブロックから遠すぎる場合
-        if (distance > this.MAX_REACHABLE_DISTANCE) {
-            USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
-            this.executeNextStep(); // 移動後に再評価
-            return;
-        }
-
-        // ケース2：ブロックに近すぎる（真上や隣にいる）場合
-        if (distance < this.MIN_REACHABLE_DISTANCE) {
-            USE_PATHFINDER ? await this.backUpWithPF(targetBlock) : await this.backUp();
-            this.executeNextStep(); // 後退後に再評価
-            return;
-        }
-
-        // ケース3：最適な距離にいる場合
-        this.startDigging(targetBlock);
-    }
-
-    private async startDigging(targetBlock: Block): Promise<void> {
-        await this.equipBestTool(targetBlock);
-        
-        this.bot.dig(targetBlock)
-            .then(() => {
-                if (!this.isActive) return;
-
-                // ★ 修正: タスクオブジェクトの数量を直接減らす
-                this.task.arguments.quantity--;
-
-                this.chatReporter.reportError(`Successfully mined. Remaining: ${this.task.arguments.quantity}`);
-                
-                // 次のブロックを探しに行く
-                this.executeNextStep();
-            })
-            .catch((err) => {
-                if (!this.isActive) return; // 意図的に停止された場合はエラー報告しない
-                this.chatReporter.reportError(`Digging failed or was interrupted: ${err.message}. Retrying...`);
-                // 1秒待ってから再試行
-                setTimeout(() => this.executeNextStep(), 1000);
-            });
-    }
-
-    private async moveToTarget(targetBlock: Block): Promise<void> {
-        this.bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5), true);
-        this.bot.setControlState('forward', true);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        this.bot.clearControlStates();
-    }
-    
-    private async backUp(): Promise<void> {
-        this.bot.setControlState('back', true);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        this.bot.clearControlStates();
-    }
-
-
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ Pathfinderを使用した移動メソッドを新規追加 ★
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    private async moveToTargetWithPF(targetBlock: Block): Promise<void> {
-        const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 2);
-        try {
-            await (this.bot as any).pathfinder.goto(goal);
-        } catch (e: any) {
-            this.chatReporter.reportError(`[Pathfinder] Could not reach target: ${e.message}`);
-        }
-    }
-
-    private async backUpWithPF(targetBlock: Block): Promise<void> {
-        // 現在地からブロックとは逆方向のベクトルを計算
-        const backVector = this.bot.entity.position.minus(targetBlock.position).normalize().scale(2);
-        const goalPosition = this.bot.entity.position.plus(backVector);
-        const goal = new goals.GoalBlock(goalPosition.x, goalPosition.y, goalPosition.z);
-         try {
-            await (this.bot as any).pathfinder.goto(goal);
-        } catch (e: any) {
-            this.chatReporter.reportError(`[Pathfinder] Could not back up: ${e.message}`);
-        }
-    }
-
-    private async equipBestTool(block: Block): Promise<void> {
-        const bestTool = this.getBestToolFor(block);
-        if (bestTool) {
-            await this.bot.equip(bestTool, 'hand');
-        } else if (this.bot.heldItem) {
-            await this.bot.unequip('hand');
-        }
-    }
-
-    private getBestToolFor(block: Block): Item | null {
-        const blockName = block.name;
-        let toolType = '';
-
-        if (blockName.includes('log') || blockName.includes('planks') || blockName.includes('wood')) {
-            toolType = '_axe';
-        } else if (blockName.includes('stone') || blockName.includes('ore') || blockName.includes('cobble')) {
-            toolType = '_pickaxe';
-        } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
-            toolType = '_shovel';
-        } else {
-            return null;
-        }
-
-        const tools = this.bot.inventory.items().filter(item => item.name.endsWith(toolType));
-        if (tools.length === 0) return null;
-
-        const priority = ["netherite", "diamond", "iron", "stone", "wooden", "golden"];
-        tools.sort((a, b) => {
-            const matA = priority.findIndex(p => a.name.startsWith(p));
-            const matB = priority.findIndex(p => b.name.startsWith(p));
-            return (matA === -1 ? 99 : matA) - (matB === -1 ? 99 : matB);
+        this.behaviorEngine.on('taskFinished', (finishedTask: Task, reason: string) => {
+            // 正常完了したタスクで、プランナーが即時生成したものでなければキューから削除
+            if (!finishedTask.taskId.startsWith('planner-') && reason === 'Completed successfully') {
+                this.taskManager.removeTask(finishedTask.taskId);
+            }
+            // 完了・中断を問わず、即座に次の行動を評価する
+            this.mainLoop();
         });
+
+        this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
+        console.log('Planner (Stateful Model) initialized. Bot brain is now active.');
+    }
+
+    /**
+     * メインの思考ループ。
+     * 「理想の行動」と「現在の行動」を比較し、状態を遷移させる。
+     */
+    private mainLoop(): void {
+        const idealAction = this.determineIdealAction();
+        const currentAction = this.behaviorEngine.getActiveTask();
+
+        if (currentAction) {
+            // --- ケースA: ボットが何かを実行中の場合 ---
+            // 理想の行動がない、または理想と現在の行動が異なるなら、現在のタスクを中断する。
+            if (!idealAction || idealAction.taskId !== currentAction.taskId) {
+                this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
+            }
+            // (理想と現在が同じなら何もしないで継続)
+
+        } else {
+            // --- ケースB: ボットがアイドル状態の場合 ---
+            // 実行すべき理想の行動があれば、それを開始する
+            if (idealAction) {
+                this.startTask(idealAction);
+            }
+        }
+    }
+
+    /**
+     * 現在の状況から、実行すべき最も優先度の高い「理想の行動」を一つだけ決定する。
+     * @returns 実行すべきTaskオブジェクト、またはnull
+     */
+    private determineIdealAction(): Task | null {
+        const currentAction = this.behaviorEngine.getActiveTask();
+
+        // 最優先事項：戦闘
+        if (this.modeManager.isCombatMode()) {
+            const nearestHostile = this.findNearestHostileMob(10);
+            if (nearestHostile) {
+                if (currentAction && currentAction.type === 'combat' && currentAction.arguments.targetEntityId === nearestHostile.id) {
+                    return currentAction;
+                }
+                return this.createAction('combat', { targetEntityId: nearestHostile.id });
+            }
+        }
+
+        // 割り込みがないかチェック
+        const highPriorityPendingTask = this.findHighPriorityPendingTask(currentAction ? currentAction.priority : 999);
+        if (highPriorityPendingTask) {
+            return highPriorityPendingTask;
+        }
         
-        return tools[0];
+        // 割り込みがなく、現在のタスクがまだ有効なら、現在のタスクを続けるのが理想
+        if (currentAction && this.isTaskStillValid(currentAction)) {
+            return currentAction;
+        }
+
+        // アイドル状態、または現在のタスクが無効になった場合、次にやるべき未着手タスクを探す
+        for (const mode of MODE_PRIORITY_ORDER) {
+            if (mode === 'MINING' && this.modeManager.isMiningMode()) {
+                const task = this.taskManager.findNextPendingMiningTask();
+                if (task) return task;
+            }
+            if (mode === 'FOLLOW' && this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+                return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
+            }
+            if (mode === 'GENERAL') {
+                const task = this.taskManager.findNextPendingGeneralTask();
+                if (task) return task;
+            }
+        }
+
+        return null; // 何もすることがない
+    }
+
+    private startTask(task: Task): void {
+        if (!task.taskId.startsWith('planner-')) {
+            this.taskManager.setTaskStatus(task.taskId, 'running');
+        }
+        this.behaviorEngine.executeTask(task);
+    }
+
+    // ========== ヘルパーメソッド群 ==========
+
+    private findHighPriorityPendingTask(currentPriority: number): Task | null {
+        const nextMiningTask = this.taskManager.findNextPendingMiningTask();
+        if (nextMiningTask && nextMiningTask.priority < currentPriority) {
+            return nextMiningTask;
+        }
+        return null;
+    }
+
+    private isTaskStillValid(task: Task): boolean {
+        switch (task.type) {
+            case 'mine':
+                return this.modeManager.isMiningMode();
+            case 'follow':
+                return this.modeManager.isFollowMode();
+            default:
+                return true;
+        }
+    }
+
+    private findNearestHostileMob(range: number): WorldEntity | null {
+        const botEntity = this.worldKnowledge.getBotEntity();
+        if (!botEntity) return null;
+        const hostileMobNames = ['zombie', 'skeleton', 'spider', 'creeper'];
+        let closestMob: WorldEntity | null = null;
+        let closestDistance = Infinity;
+        for (const entity of this.worldKnowledge.getAllEntities()) {
+            if (entity.type === 'hostile' || (entity.name && hostileMobNames.includes(entity.name))) {
+                const distance = entity.position.distanceTo(botEntity.position);
+                if (distance <= range && distance < closestDistance) {
+                    closestDistance = distance;
+                    closestMob = entity;
+                }
+            }
+        }
+        return closestMob;
+    }
+
+    private createAction(type: Task['type'], args: any): Task {
+        return {
+            taskId: `planner-${type}-${Date.now()}`,
+            type: type,
+            arguments: args,
+            status: 'running',
+            priority: ACTION_PRIORITIES[type] ?? 100,
+            createdAt: Date.now(),
+        };
     }
 }
