@@ -1,4 +1,4 @@
-// src/core/systemFactory.ts (最終修正版)
+// src/core/systemFactory.ts (修正後)
 
 import { BotManager } from '../services/BotManager';
 import { CommandHandler } from '../services/CommandHandler';
@@ -19,17 +19,17 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             
-            // ★★★★★★★★★★ ここが最終的な解決策 ★★★★★★★★★★
-            // mineflayerがサーバーバージョンを誤認識する問題への対策として、
-            // bot.versionを元に、強制的に正しいminecraft-dataを読み込ませる。
             const mcData = require('minecraft-data')(bot.version);
-            bot.registry = mcData; // より確実に反映させるため、botのregistryにも直接代入する
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            bot.registry = mcData;
 
+            // ★ 修正: 古いbehaviorEngineの宣言を削除し、依存関係の順序を整理
             const worldKnowledge = new WorldKnowledge(bot);
-            const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager, chatReporter);
             const modeManager = new ModeManager(chatReporter);
             const taskManager = new TaskManager(chatReporter);
+            
+            // ★ 修正: 正しい引数でbehaviorEngineを一度だけ生成する
+            const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager, chatReporter, taskManager); 
+            
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);
             const planner = new Planner(behaviorEngine, taskManager, modeManager, worldKnowledge, statusManager, chatReporter);
             
@@ -41,4 +41,3 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
 
     return commandHandler;
 }
-

@@ -10,7 +10,6 @@ export interface CurrentBehavior {
     target?: any;
 }
 
-// McpCommandのtypeにsetMiningModeを追加し、その内容を更新
 export interface McpCommand {
     type: 'setMiningMode' | 'setFollowMode' | 'setCombatMode' | 'getStatus' | 'stop' | 'setHome';
     id: number;
@@ -25,10 +24,11 @@ export interface Task {
     taskId: string;
     type: 'mine' | 'follow' | 'combat' | 'goto' | 'dropItems' | 'patrol';
     status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-    arguments: any;
+    arguments: any; // progressを含むためanyのままにするか、より厳密な型を定義
     priority: number;
     createdAt: number;
     result?: any;
+    queueType?: 'mining' | 'general'; // ★ 修正: キューの種類を保持
 }
 
 /**
@@ -43,7 +43,6 @@ export interface BotStatus {
     inventory: { name: string, count: number, type: number }[];
     nearbyEntities: { name: string, type: string, distance: number }[];
     currentTask: { taskId: string, type: string, detail: string } | null;
-    // ★ここを修正: miningModeを追加
     modes: {
         combatMode: boolean;
         followMode: boolean;

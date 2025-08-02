@@ -1,4 +1,4 @@
-// src/behaviors/mineBlock.ts (Promise形式・最終修正版)
+// src/behaviors/mineBlock.ts (修正後)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
@@ -11,13 +11,14 @@ export interface MineBlockOptions {
     blockName?: string | null;
     quantity?: number;
     maxDistance?: number;
+    progress?: { minedCount: number };
 }
 
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private chatReporter: ChatReporter;
-    private options: Required<Omit<MineBlockOptions, 'blockName'> & { blockName: string | null }>;
+    private options: Required<Omit<MineBlockOptions, "blockName" | "progress"> & { blockName: string | null, progress: { minedCount: number } }>;
     private isActive: boolean = false;
     private minedCount: number = 0;
     private readonly REACHABLE_DISTANCE = 4.0;
@@ -30,7 +31,17 @@ export class MineBlockBehavior {
             quantity: options.quantity ?? 1,
             maxDistance: options.maxDistance ?? 32,
             blockName: options.blockName ?? null,
+            progress: options.progress ?? { minedCount: 0 }
         };
+
+        this.minedCount = this.options.progress.minedCount;
+        if (this.minedCount > 0) {
+            this.chatReporter.reportError(`[DEBUG] Resuming mining task. Already mined: ${this.minedCount}`);
+        }
+    }
+
+    public getProgress() {
+        return { minedCount: this.minedCount };
     }
 
     public start(): boolean {
@@ -43,7 +54,6 @@ export class MineBlockBehavior {
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
-        // 採掘中にstop()が呼ばれると、bot.dig()のPromiseがrejectされ、.catch()が呼ばれる
         this.bot.stopDigging();
         this.bot.clearControlStates();
     }
@@ -57,12 +67,11 @@ export class MineBlockBehavior {
     }
 
     private async executeNextStep(): Promise<void> {
-        // タスクが非アクティブになったか、目標数を達成したら終了
         if (!this.isActive || this.minedCount >= this.options.quantity) {
-            this.isActive = false; // 確実に終了させる
+            this.isActive = false;
             return;
         }
-        
+
         const blockId = this.options.blockName ? this.bot.registry.blocksByName[this.options.blockName]?.id : null;
         if (!blockId) {
             this.chatReporter.reportError(`Unknown block name: ${this.options.blockName}`);
@@ -71,7 +80,7 @@ export class MineBlockBehavior {
         }
 
         const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.options.maxDistance);
-        
+
         if (!targetBlock) {
             this.chatReporter.reportError(`Could not find any more ${this.options.blockName}. Stopping task.`);
             this.isActive = false;
@@ -82,40 +91,32 @@ export class MineBlockBehavior {
 
         if (distance > this.REACHABLE_DISTANCE) {
             await this.moveToTarget(targetBlock);
-            // 移動後、再度次のステップを評価する
             this.executeNextStep();
             return;
         }
-        
-        // 採掘可能な位置にいれば、採掘を開始
+
         this.startDigging(targetBlock);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
         await this.equipBestTool(targetBlock);
         this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetBlock.position}.`);
-        
-        // ★★★★★★★★★★ ここをあなたのテストコードに基づき、全面的に修正 ★★★★★★★★★★
+
         this.bot.dig(targetBlock)
             .then(() => {
-                // 採掘が完了したときの処理
-                if (!this.isActive) return; // 既に停止命令が出ていれば何もしない
+                if (!this.isActive) return;
 
                 this.minedCount++;
                 this.chatReporter.reportError(`Successfully mined ${this.minedCount}/${this.options.quantity} of ${this.options.blockName}.`);
-                
-                // 次のブロックを探しに行く
+
                 this.executeNextStep();
             })
             .catch((err) => {
-                // 採掘が失敗、または中断されたときの処理
-                if (!this.isActive) return; // 意図的に停止された場合はエラー報告しない
+                if (!this.isActive) return;
 
                 this.chatReporter.reportError(`Digging failed or was interrupted: ${err.message}. Retrying...`);
-                // 1秒待ってから再試行
                 setTimeout(() => this.executeNextStep(), 1000);
             });
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     }
 
     private async moveToTarget(targetBlock: Block): Promise<void> {
@@ -124,7 +125,7 @@ export class MineBlockBehavior {
         await new Promise(resolve => setTimeout(resolve, 200));
         this.bot.clearControlStates();
     }
-    
+
     private async equipBestTool(block: Block): Promise<void> {
         const bestTool = this.getBestToolFor(block);
         if (bestTool) {
@@ -142,6 +143,7 @@ export class MineBlockBehavior {
             toolType = '_axe';
         } else if (blockName.includes('stone') || blockName.includes('ore') || blockName.includes('cobble')) {
             toolType = '_pickaxe';
+        // ★ 修正: 'blockname' を 'blockName' に修正
         } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
             toolType = '_shovel';
         } else {
@@ -157,7 +159,7 @@ export class MineBlockBehavior {
             const matB = priority.findIndex(p => b.name.startsWith(p));
             return (matA === -1 ? 99 : matA) - (matB === -1 ? 99 : matB);
         });
-        
+
         return tools[0];
     }
 }

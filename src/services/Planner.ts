@@ -1,4 +1,4 @@
-// src/services/Planner.ts (モード優先指向・修正版)
+// src/services/Planner.ts (中断・再開対応版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -13,8 +13,6 @@ const ACTION_PRIORITIES: { [key in Task['type']]: number } = {
     'combat': 0, 'mine': 10, 'dropItems': 12, 'goto': 8, 'follow': 20, 'patrol': 15,
 };
 
-// ★★★★★★★★★★ ここからが新しい設計 ★★★★★★★★★★
-// 思考の優先順位を定義。この配列の順番を変更するだけで、ボットの行動優先度を安全に変更できる。
 type ModeType = 'COMBAT' | 'MINING' | 'FOLLOW' | 'GENERAL';
 const MODE_PRIORITY_ORDER: ModeType[] = [
     'COMBAT',
@@ -22,7 +20,6 @@ const MODE_PRIORITY_ORDER: ModeType[] = [
     'FOLLOW',
     'GENERAL'
 ];
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 export class Planner {
     private behaviorEngine: BehaviorEngine;
@@ -67,17 +64,21 @@ export class Planner {
 
         if (currentTask) {
             // --- ケース1: ボットが何かタスクを実行中の場合 ---
-            if (!idealAction || idealAction.type !== currentTask.type) {
-                this.behaviorEngine.stopCurrentBehavior();
+            // 理想の行動があり、かつ現在の行動とタイプが異なる場合（＝より優先度の高いタスクが見つかった場合）
+            if (idealAction && idealAction.type !== currentTask.type) {
+                // 「中断」扱いで現在のタスクを停止させる。
+                this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
             }
 
         } else {
             // --- ケース2: ボットがアイドル状態の場合 ---
             if (idealAction) {
                 let taskToExecute: Task | null = null;
+                // プランナーが生成したタスクか、タスクマネージャーのタスクかを確認
                 if (idealAction.taskId.startsWith('planner-')) {
                     taskToExecute = idealAction;
                 } else {
+                    // タスクIDで比較して、正しいキューからタスクを取得する
                     if (this.taskManager.peekNextMiningTask()?.taskId === idealAction.taskId) {
                         taskToExecute = this.taskManager.getNextMiningTask();
                     } else if (this.taskManager.peekNextGeneralTask()?.taskId === idealAction.taskId) {
@@ -97,8 +98,6 @@ export class Planner {
      * @returns 実行すべきTaskオブジェクト、またはnull
      */
     private decideNextAction(): Task | null {
-        // ★★★★★★★★★★ ここからが新しい設計 ★★★★★★★★★★
-        // 定義された優先順位リストを順番にチェックする
         for (const mode of MODE_PRIORITY_ORDER) {
             let task: Task | null = null;
 
@@ -113,6 +112,12 @@ export class Planner {
                     break;
                 
                 case 'MINING':
+                    // 実行中のmineタスクがあれば、それを最優先で継続する
+                    const currentTask = this.behaviorEngine.getActiveTask();
+                    if (currentTask && currentTask.type === 'mine') {
+                        return currentTask;
+                    }
+                    // 実行中のタスクがない場合のみ、キューから新しいタスクを探す
                     if (this.modeManager.isMiningMode()) {
                         task = this.taskManager.peekNextMiningTask();
                     }
@@ -129,15 +134,10 @@ export class Planner {
                     break;
             }
 
-            // もし、いずれかのモードでやるべきタスクが見つかったら、
-            // それが最優先事項なので、すぐに思考を終了してそのタスクを返す。
             if (task) {
                 return task;
             }
         }
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-        // すべてのモードをチェックしても、やるべきことは何もなかった
         return null;
     }
 
