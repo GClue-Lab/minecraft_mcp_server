@@ -39,7 +39,6 @@ export class Planner {
 
         this.behaviorEngine.on('taskFinished', () => this.mainLoop());
         
-        // 元のシンプルなsetIntervalに戻す
         this.mainLoopInterval = setInterval(() => {
             this.mainLoop();
         }, 500);
