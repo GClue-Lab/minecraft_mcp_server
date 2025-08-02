@@ -5,7 +5,14 @@ import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
+import { goals } from 'mineflayer-pathfinder'; // ★ インポートを追加
 import { Task } from '../types/mcp'; // ★Task型をインポート
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ 移動ロジック切り替えフラグ ★
+// true: mineflayer-pathfinderを使用 / false: 自作の簡易移動を使用
+const USE_PATHFINDER = true; 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
@@ -37,6 +44,7 @@ export class MineBlockBehavior {
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
+        (this.bot as any).pathfinder.stop(); // pathfinderの移動も停止
         this.bot.stopDigging();
         this.bot.clearControlStates();
     }
@@ -72,16 +80,14 @@ export class MineBlockBehavior {
         const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
         // ケース1：ブロックから遠すぎる場合
         if (distance > this.MAX_REACHABLE_DISTANCE) {
-            //this.chatReporter.reportError(`[DEBUG] Too far from block (${distance.toFixed(2)}m). Moving closer.`);
-            await this.moveToTarget(targetBlock);
+            USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
             this.executeNextStep(); // 移動後に再評価
             return;
         }
 
         // ケース2：ブロックに近すぎる（真上や隣にいる）場合
         if (distance < this.MIN_REACHABLE_DISTANCE) {
-            //this.chatReporter.reportError(`[DEBUG] Too close to block (${distance.toFixed(2)}m). Backing up.`);
-            await this.backUp();
+            USE_PATHFINDER ? await this.backUpWithPF(targetBlock) : await this.backUp();
             this.executeNextStep(); // 後退後に再評価
             return;
         }
@@ -124,6 +130,31 @@ export class MineBlockBehavior {
         this.bot.setControlState('back', true);
         await new Promise(resolve => setTimeout(resolve, 100));
         this.bot.clearControlStates();
+    }
+
+
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ Pathfinderを使用した移動メソッドを新規追加 ★
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    private async moveToTargetWithPF(targetBlock: Block): Promise<void> {
+        const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 2);
+        try {
+            await (this.bot as any).pathfinder.goto(goal);
+        } catch (e: any) {
+            this.chatReporter.reportError(`[Pathfinder] Could not reach target: ${e.message}`);
+        }
+    }
+
+    private async backUpWithPF(targetBlock: Block): Promise<void> {
+        // 現在地からブロックとは逆方向のベクトルを計算
+        const backVector = this.bot.entity.position.minus(targetBlock.position).normalize().scale(2);
+        const goalPosition = this.bot.entity.position.plus(backVector);
+        const goal = new goals.GoalBlock(goalPosition.x, goalPosition.y, goalPosition.z);
+         try {
+            await (this.bot as any).pathfinder.goto(goal);
+        } catch (e: any) {
+            this.chatReporter.reportError(`[Pathfinder] Could not back up: ${e.message}`);
+        }
     }
 
     private async equipBestTool(block: Block): Promise<void> {

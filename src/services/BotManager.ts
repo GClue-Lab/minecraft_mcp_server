@@ -2,6 +2,7 @@
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
+import { pathfinder, Movements } from 'mineflayer-pathfinder';
 
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
@@ -35,12 +36,16 @@ export class BotManager {
                 username: this.username,
             });
 
+            this.bot.loadPlugin(pathfinder);
             this.setupBotListeners();
 
             await new Promise<void>((resolve, reject) => {
                 if (!this.bot) return reject(new Error("Bot not initialized"));
 
                 this.bot.once('spawn', () => {
+                    const defaultMove = new Movements(this.bot as mineflayer.Bot);
+                    (this.bot as any).pathfinder.setMovements(defaultMove);
+
                     this.setStatus('connected');
                     this.botInstanceEventEmitter.emit('spawn', this.bot);
                     resolve();
