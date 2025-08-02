@@ -122,7 +122,7 @@ export class MineBlockBehavior {
     
     private async backUp(): Promise<void> {
         this.bot.setControlState('back', true);
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 100));
         this.bot.clearControlStates();
     }
 
