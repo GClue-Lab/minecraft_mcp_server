@@ -1,9 +1,10 @@
 import mineflayer, { Bot } from 'mineflayer';
 import { pathfinder, Movements, goals } from 'mineflayer-pathfinder';
+import { Block } from 'prismarine-block'; // Blockの型をインポート
 
 // --- サーバー接続情報 ---
 const BOT_USERNAME: string = 'CollectorBot';
-const SERVER_ADDRESS: string = 'docker.host.internal';
+const SERVER_ADDRESS: string = 'host.docker.internal';
 const SERVER_PORT: number = 25565;
 // -----------------------
 
@@ -21,7 +22,6 @@ bot.once('spawn', () => {
   const defaultMove = new Movements(bot);
   bot.pathfinder.setMovements(defaultMove);
 
-  // 'async'キーワードを削除し、.then()チェーンで処理を記述
   bot.on('chat', (username: string, message: string) => {
     if (username === bot.username) return;
 
@@ -33,7 +33,6 @@ bot.once('spawn', () => {
     }
 
     const blockNameToCollect: string = args[1];
-
     const blockType = bot.registry.blocksByName[blockNameToCollect];
     if (!blockType) {
       bot.chat(`「${blockNameToCollect}」というブロックは存在しません。`);
@@ -42,36 +41,35 @@ bot.once('spawn', () => {
 
     bot.chat(`${blockNameToCollect} を探しに行きます。`);
 
-    // findBlockから.then()で処理を繋げる
-    bot.findBlock({
+    // --- ここからが大きな修正点 ---
+
+    // 1. findBlockは同期関数のため、直接呼び出して結果を受け取る
+    const block: Block | null = bot.findBlock({
       matching: blockType.id,
       maxDistance: 64,
-    })
-    .then(block => {
-      // 最初のPromise(findBlock)が成功したときの処理
-      if (!block) {
-        bot.chat('近くに指定されたブロックが見つかりませんでした。');
-        // これ以上処理を続けない
-        return; 
-      }
-
-      // 次の非同期処理(goto)のPromiseを返すことで、チェーンを繋げる
-      return bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1))
-        .then(() => {
-          // gotoが成功したら、次の非同期処理(dig)のPromiseを返す
-          return bot.dig(block);
-        });
-    })
-    .then(() => {
-      // digが成功したら、最後の処理を実行
-      bot.chat('採取が完了しました！');
-    })
-    .catch(err => {
-      // チェーンのどこかでエラーが発生したら、ここで一括して捉える
-      const error = err as Error;
-      console.error(error);
-      bot.chat(`エラーが発生しました: ${error.message}`);
     });
+
+    // 2. 結果をチェックする
+    if (!block) {
+      bot.chat('近くに指定されたブロックが見つかりませんでした。');
+      return;
+    }
+
+    // 3. 最初の非同期関数である `goto` からPromiseチェーンを開始する
+    bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1))
+      .then(() => {
+        // gotoが成功したら、次の非同期処理(dig)のPromiseを返す
+        return bot.dig(block);
+      })
+      .then(() => {
+        // digが成功したら、最後の処理を実行
+        bot.chat('採取が完了しました！');
+      })
+      .catch((err: Error) => { // 型を明記
+        // gotoまたはdigでエラーが発生した場合
+        console.error(err);
+        bot.chat(`エラーが発生しました: ${err.message}`);
+      });
   });
 });
 
