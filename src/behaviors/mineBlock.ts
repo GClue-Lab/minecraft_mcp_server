@@ -1,47 +1,29 @@
-// src/behaviors/mineBlock.ts (修正後)
+// src/behaviors/mineBlock.ts (新設計・タスクオブジェクト参照版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { Vec3 } from 'vec3';
-
-export interface MineBlockOptions {
-    blockName?: string | null;
-    quantity?: number;
-    maxDistance?: number;
-    progress?: { minedCount: number };
-}
+import { Task } from '../types/mcp'; // ★Task型をインポート
 
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private chatReporter: ChatReporter;
-    private options: Required<Omit<MineBlockOptions, "blockName" | "progress"> & { blockName: string | null, progress: { minedCount: number } }>;
+    private task: Task; // ★オプションの代わりに、タスクオブジェクト全体を保持する
     private isActive: boolean = false;
-    private minedCount: number = 0;
     private readonly REACHABLE_DISTANCE = 4.0;
 
-    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, options: MineBlockOptions) {
+    constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.chatReporter = chatReporter;
-        this.options = {
-            quantity: options.quantity ?? 1,
-            maxDistance: options.maxDistance ?? 32,
-            blockName: options.blockName ?? null,
-            progress: options.progress ?? { minedCount: 0 }
-        };
-
-        this.minedCount = this.options.progress.minedCount;
-        if (this.minedCount > 0) {
-            this.chatReporter.reportError(`[DEBUG] Resuming mining task. Already mined: ${this.minedCount}`);
-        }
-    }
-
-    public getProgress() {
-        return { minedCount: this.minedCount };
+        this.task = task; // ★渡されたタスクを保持
+        
+        // 引数のデフォルト値を設定
+        this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
+        this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
     }
 
     public start(): boolean {
@@ -62,27 +44,26 @@ export class MineBlockBehavior {
         return this.isActive;
     }
 
-    public getOptions(): MineBlockOptions {
-        return this.options;
-    }
-
     private async executeNextStep(): Promise<void> {
-        if (!this.isActive || this.minedCount >= this.options.quantity) {
-            this.isActive = false;
+        // ★ 修正: タスクオブジェクトの残り数量を確認
+        if (!this.isActive || this.task.arguments.quantity <= 0) {
+            this.isActive = false; // 完了したら非アクティブ化
             return;
         }
+        
+        const blockName = this.task.arguments.blockName;
+        const blockId = blockName ? this.bot.registry.blocksByName[blockName]?.id : null;
 
-        const blockId = this.options.blockName ? this.bot.registry.blocksByName[this.options.blockName]?.id : null;
         if (!blockId) {
-            this.chatReporter.reportError(`Unknown block name: ${this.options.blockName}`);
+            this.chatReporter.reportError(`Unknown block name: ${blockName}`);
             this.isActive = false;
             return;
         }
 
-        const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.options.maxDistance);
-
+        const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
+        
         if (!targetBlock) {
-            this.chatReporter.reportError(`Could not find any more ${this.options.blockName}. Stopping task.`);
+            this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
             this.isActive = false;
             return;
         }
@@ -91,30 +72,34 @@ export class MineBlockBehavior {
 
         if (distance > this.REACHABLE_DISTANCE) {
             await this.moveToTarget(targetBlock);
+            // 移動後、再度次のステップを評価する
             this.executeNextStep();
             return;
         }
-
+        
+        // 採掘可能な位置にいれば、採掘を開始
         this.startDigging(targetBlock);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
         await this.equipBestTool(targetBlock);
-        this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetBlock.position}.`);
-
+        
         this.bot.dig(targetBlock)
             .then(() => {
                 if (!this.isActive) return;
 
-                this.minedCount++;
-                this.chatReporter.reportError(`Successfully mined ${this.minedCount}/${this.options.quantity} of ${this.options.blockName}.`);
+                // ★ 修正: タスクオブジェクトの数量を直接減らす
+                this.task.arguments.quantity--;
 
+                this.chatReporter.reportError(`Successfully mined. Remaining: ${this.task.arguments.quantity}`);
+                
+                // 次のブロックを探しに行く
                 this.executeNextStep();
             })
             .catch((err) => {
-                if (!this.isActive) return;
-
+                if (!this.isActive) return; // 意図的に停止された場合はエラー報告しない
                 this.chatReporter.reportError(`Digging failed or was interrupted: ${err.message}. Retrying...`);
+                // 1秒待ってから再試行
                 setTimeout(() => this.executeNextStep(), 1000);
             });
     }
@@ -125,7 +110,7 @@ export class MineBlockBehavior {
         await new Promise(resolve => setTimeout(resolve, 200));
         this.bot.clearControlStates();
     }
-
+    
     private async equipBestTool(block: Block): Promise<void> {
         const bestTool = this.getBestToolFor(block);
         if (bestTool) {
@@ -143,7 +128,6 @@ export class MineBlockBehavior {
             toolType = '_axe';
         } else if (blockName.includes('stone') || blockName.includes('ore') || blockName.includes('cobble')) {
             toolType = '_pickaxe';
-        // ★ 修正: 'blockname' を 'blockName' に修正
         } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
             toolType = '_shovel';
         } else {
@@ -159,7 +143,7 @@ export class MineBlockBehavior {
             const matB = priority.findIndex(p => b.name.startsWith(p));
             return (matA === -1 ? 99 : matA) - (matB === -1 ? 99 : matB);
         });
-
+        
         return tools[0];
     }
 }

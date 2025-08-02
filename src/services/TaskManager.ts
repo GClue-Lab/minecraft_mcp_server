@@ -1,4 +1,4 @@
-// src/services/TaskManager.ts (中断・再開対応版)
+// src/services/TaskManager.ts (新設計・状態管理対応版)
 
 import { Task } from '../types/mcp';
 import { randomUUID } from 'crypto';
@@ -10,44 +10,30 @@ const TASK_PRIORITIES: { [key in Task['type']]: number } = {
 
 class TaskQueue {
     private tasks: Task[] = [];
-    private chatReporter: ChatReporter | null = null;
-    private queueName: string;
-
-    constructor(queueName: string, chatReporter?: ChatReporter) {
-        this.queueName = queueName;
-        this.chatReporter = chatReporter || null;
-    }
-
     public add(task: Task): void {
-        this.chatReporter?.reportError(`[DEBUG] TaskQueue (${this.queueName}): Adding task '${task.type}'.`);
         this.tasks.push(task);
         this.tasks.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
     }
-
-    public peek(): Task | null {
-        return this.tasks.length > 0 ? this.tasks[0] : null;
+    public findNextPendingTask = (): Task | null => this.tasks.find(t => t.status === 'pending') || null;
+    public getTask = (taskId: string): Task | undefined => this.tasks.find(t => t.taskId === taskId);
+    public updateTask(taskId: string, updates: Partial<Omit<Task, 'taskId'>>): boolean {
+        const task = this.getTask(taskId);
+        if (task) {
+            Object.assign(task, updates);
+            return true;
+        }
+        return false;
     }
-
-    public getNext(): Task | null {
-        return this.tasks.length > 0 ? this.tasks.shift()! : null;
+    public removeTask = (taskId: string): boolean => {
+        const index = this.tasks.findIndex(t => t.taskId === taskId);
+        if (index > -1) {
+            this.tasks.splice(index, 1);
+            return true;
+        }
+        return false;
     }
-
-    public clear(): void {
-        this.tasks = [];
-    }
-
-    public getTasks(): readonly Task[] {
-        return this.tasks;
-    }
-
-    /**
-     * 中断されたタスクをキューの先頭に戻す
-     * @param task 復帰させるタスク
-     */
-    public requeue(task: Task): void {
-        this.chatReporter?.reportError(`[DEBUG] TaskQueue (${this.queueName}): Re-queuing interrupted task '${task.type}'.`);
-        this.tasks.unshift(task); // pushの代わりにunshiftで先頭に追加
-    }
+    public clear = (): void => { this.tasks = []; }
+    public getTasks = (): readonly Task[] => this.tasks;
 }
 
 export class TaskManager {
@@ -57,12 +43,11 @@ export class TaskManager {
 
     constructor(chatReporter: ChatReporter) {
         this.chatReporter = chatReporter;
-        this.miningQueue = new TaskQueue('Mining', this.chatReporter);
-        this.generalQueue = new TaskQueue('General', this.chatReporter);
-        console.log('TaskManager (Multi-Queue) initialized.');
+        this.miningQueue = new TaskQueue();
+        this.generalQueue = new TaskQueue();
     }
 
-    private createTask(type: Task['type'], args: any, priority: number | undefined, queueType: 'mining' | 'general'): Task {
+    private createTask(type: Task['type'], args: any, priority?: number): Task {
         return {
             taskId: randomUUID(),
             type: type,
@@ -70,36 +55,40 @@ export class TaskManager {
             status: 'pending',
             priority: priority ?? TASK_PRIORITIES[type] ?? 99,
             createdAt: Date.now(),
-            queueType: queueType, // ★キューの種類をタスク自身が保持する
         };
     }
 
-    public addMiningTask(type: Task['type'], args: any, priority?: number): string {
-        const newTask = this.createTask(type, args, priority, 'mining');
+    // ★ 修正: addMiningTaskのシグネチャを変更
+    public addMiningTask(args: any, priority?: number): string {
+        const newTask = this.createTask('mine', args, priority);
         this.miningQueue.add(newTask);
         return newTask.taskId;
     }
-    public peekNextMiningTask(): Task | null { return this.miningQueue.peek(); }
-    public getNextMiningTask(): Task | null { return this.miningQueue.getNext(); }
-    public clearMiningTasks(): void { this.miningQueue.clear(); }
-    public requeueMiningTask(task: Task): void { this.miningQueue.requeue(task); }
-
     public addGeneralTask(type: Task['type'], args: any, priority?: number): string {
-        const newTask = this.createTask(type, args, priority, 'general');
+        const newTask = this.createTask(type, args, priority);
         this.generalQueue.add(newTask);
         return newTask.taskId;
     }
-    public peekNextGeneralTask(): Task | null { return this.generalQueue.peek(); }
-    public getNextGeneralTask(): Task | null { return this.generalQueue.getNext(); }
-    public clearGeneralTasks(): void { this.generalQueue.clear(); }
-    public requeueGeneralTask(task: Task): void { this.generalQueue.requeue(task); }
-
-
-    public getStatus() {
-        const format = (t: Task) => ({ id: t.taskId, type: t.type, priority: t.priority });
-        return {
-            miningQueue: this.miningQueue.getTasks().map(format),
-            generalQueue: this.generalQueue.getTasks().map(format),
-        };
+    
+    // ★ 修正: メソッド名を変更
+    public findNextPendingMiningTask = (): Task | null => this.miningQueue.findNextPendingTask();
+    public findNextPendingGeneralTask = (): Task | null => this.generalQueue.findNextPendingTask();
+    
+    public getTask = (taskId: string): Task | undefined => this.miningQueue.getTask(taskId) || this.generalQueue.getTask(taskId);
+    
+    public setTaskStatus(taskId: string, status: Task['status']): boolean {
+        this.chatReporter.reportError(`[DEBUG] Setting task ${taskId} status to ${status}`);
+        return this.miningQueue.updateTask(taskId, { status }) || this.generalQueue.updateTask(taskId, { status });
+    }
+    public updateTaskArguments(taskId: string, newArguments: any): boolean {
+        this.chatReporter.reportError(`[DEBUG] Updating task ${taskId} arguments.`);
+        return this.miningQueue.updateTask(taskId, { arguments: newArguments }) || this.generalQueue.updateTask(taskId, { arguments: newArguments });
+    }
+    public removeTask = (taskId: string): boolean => this.miningQueue.removeTask(taskId) || this.generalQueue.removeTask(taskId);
+    
+    // ★ 修正: clearMiningTasksメソッドを再実装
+    public clearMiningTasks = (): void => {
+        this.chatReporter.reportError(`[DEBUG] Clearing all mining tasks.`);
+        this.miningQueue.clear();
     }
 }

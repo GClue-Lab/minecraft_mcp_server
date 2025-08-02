@@ -1,4 +1,4 @@
-// src/services/BehaviorEngine.ts (中断・再開対応版)
+// src/services/BehaviorEngine.ts (修正後)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
@@ -10,46 +10,49 @@ import { DropItemsBehavior } from '../behaviors/dropItems';
 import { BotManager } from './BotManager';
 import { Task } from '../types/mcp';
 import { ChatReporter } from './ChatReporter';
-import { TaskManager } from './TaskManager'; // ★インポートを追加
+import { TaskManager } from './TaskManager';
 
 export class BehaviorEngine extends EventEmitter {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private botManager: BotManager;
-    private chatReporter: ChatReporter;
-    private taskManager: TaskManager; // ★プロパティを追加
+    private taskManager: TaskManager;
     private activeBehaviorInstance: any | null = null;
     private activeTask: Task | null = null;
+    private chatReporter: ChatReporter; // ★ 修正: プロパティを復元
 
     constructor(
         bot: mineflayer.Bot, 
         worldKnowledge: WorldKnowledge, 
         botManager: BotManager, 
         chatReporter: ChatReporter,
-        taskManager: TaskManager // ★コンストラクタで受け取る
+        taskManager: TaskManager
     ) {
         super();
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.botManager = botManager;
-        this.chatReporter = chatReporter;
-        this.taskManager = taskManager; // ★保持する
+        this.taskManager = taskManager;
+        this.chatReporter = chatReporter; // ★ 修正: プロパティを復元
     }
     
     public setBotInstance(newBot: mineflayer.Bot): void {
         this.bot = newBot;
     }
 
+    // ★ 修正: getActiveTaskメソッドを復元
+    public getActiveTask(): Task | null {
+        return this.activeTask;
+    }
+
     public executeTask(task: Task): boolean {
-        if (this.activeBehaviorInstance) return false;
+        if (this.activeTask) return false;
 
         this.activeTask = task;
         let newBehaviorInstance: any | null = null;
-
-        // ★コンストラクタに task.arguments を渡すように修正
         switch (task.type) {
             case 'mine':
-                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, this.chatReporter, task.arguments);
+                newBehaviorInstance = new MineBlockBehavior(this.bot, this.worldKnowledge, this.chatReporter, task);
                 break;
             case 'follow':
                 newBehaviorInstance = new FollowPlayerBehavior(this.bot, this.worldKnowledge, task.arguments);
@@ -78,38 +81,23 @@ export class BehaviorEngine extends EventEmitter {
                 return false;
             }
         }
+        // ★ 修正: 関数が必ず値を返すようにする
         return false;
     }
 
-    /**
-     * 現在の行動を停止する。理由に応じてタスクの復帰処理を行う。
-     * @param options 停止の理由。'interrupt'は再開を前提とした中断、'cancel'は完全な破棄。
-     */
     public stopCurrentBehavior(options: { reason: 'interrupt' | 'cancel' } = { reason: 'cancel' }): void {
-        this.chatReporter.reportError(`[DEBUG] BehaviorEngine: stopCurrentBehavior() called with reason: ${options.reason}`);
-        if (!this.activeBehaviorInstance || !this.activeTask) return;
+        if (!this.activeTask || !this.activeBehaviorInstance) return;
 
         const stoppedTask = this.activeTask;
-        const behavior = this.activeBehaviorInstance;
-
-        // 理由が「中断」であり、タスクを再開させたい場合
-        if (options.reason === 'interrupt') {
-            // 1. Behaviorから進捗を取得する
-            if (typeof behavior.getProgress === 'function') {
-                stoppedTask.arguments.progress = behavior.getProgress();
-                this.chatReporter.reportError(`[DEBUG] BehaviorEngine: Saved task progress.`);
-            }
-            
-            // 2. TaskManagerにタスクを戻す
-            if (stoppedTask.queueType === 'mining') {
-                this.taskManager.requeueMiningTask(stoppedTask);
-            } else if (stoppedTask.queueType === 'general') {
-                this.taskManager.requeueGeneralTask(stoppedTask);
-            }
-        }
         
-        // 共通の停止処理
-        behavior.stop();
+        if (options.reason === 'interrupt') {
+            this.taskManager.setTaskStatus(stoppedTask.taskId, 'pending');
+            this.chatReporter.reportError(`[DEBUG] Task ${stoppedTask.taskId} interrupted and set to pending.`);
+        } else { // 'cancel' の場合
+            this.taskManager.removeTask(stoppedTask.taskId);
+        }
+
+        this.activeBehaviorInstance.stop();
         this.activeBehaviorInstance = null;
         this.activeTask = null;
         this.emit('taskFinished', stoppedTask, `Stopped due to ${options.reason}`);
@@ -121,22 +109,15 @@ export class BehaviorEngine extends EventEmitter {
                 clearInterval(checkInterval);
                 return;
             }
-
             if (!instance.isRunning()) {
-                this.chatReporter.reportError("[DEBUG] BehaviorEngine: Detected that behavior is no longer running.");
                 clearInterval(checkInterval);
                 const finishedTask = this.activeTask;
                 this.activeBehaviorInstance = null;
                 this.activeTask = null;
-
                 if (finishedTask) {
                     this.emit('taskFinished', finishedTask, 'Completed successfully');
                 }
             }
         }, 500);
-    }
-
-    public getActiveTask(): Task | null {
-        return this.activeTask;
     }
 }
