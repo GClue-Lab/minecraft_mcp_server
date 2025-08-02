@@ -72,7 +72,7 @@ export class MineBlockBehavior {
         const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
         // ケース1：ブロックから遠すぎる場合
         if (distance > this.MAX_REACHABLE_DISTANCE) {
-            this.chatReporter.reportError(`[DEBUG] Too far from block (${distance.toFixed(2)}m). Moving closer.`);
+            //this.chatReporter.reportError(`[DEBUG] Too far from block (${distance.toFixed(2)}m). Moving closer.`);
             await this.moveToTarget(targetBlock);
             this.executeNextStep(); // 移動後に再評価
             return;
@@ -80,7 +80,7 @@ export class MineBlockBehavior {
 
         // ケース2：ブロックに近すぎる（真上や隣にいる）場合
         if (distance < this.MIN_REACHABLE_DISTANCE) {
-            this.chatReporter.reportError(`[DEBUG] Too close to block (${distance.toFixed(2)}m). Backing up.`);
+            //this.chatReporter.reportError(`[DEBUG] Too close to block (${distance.toFixed(2)}m). Backing up.`);
             await this.backUp();
             this.executeNextStep(); // 後退後に再評価
             return;
