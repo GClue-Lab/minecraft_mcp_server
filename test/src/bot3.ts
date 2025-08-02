@@ -5,7 +5,7 @@ import { Entity } from 'prismarine-entity';
 
 // --- 設定値 ---
 const BOT_USERNAME: string = 'GuardBot';
-const SERVER_ADDRESS: string = 'docker.host.internal';
+const SERVER_ADDRESS: string = 'host.docker.internal';
 const SERVER_PORT: number = 25565;
 
 const ZOMBIE_AGGRO_RANGE = 10; // ゾンビを敵と認識する距離

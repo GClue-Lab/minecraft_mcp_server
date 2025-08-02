@@ -1,2 +1,2 @@
 npx tsc
-node dist/bot.ts
+node dist/bot.js
