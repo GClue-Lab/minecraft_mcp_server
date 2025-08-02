@@ -16,7 +16,6 @@ export class MineBlockBehavior {
     private task: Task;
     private isActive: boolean = false;
     private readonly MAX_REACHABLE_DISTANCE = 4.0;
-    private readonly MIN_REACHABLE_DISTANCE = 1.5;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
         this.bot = bot;
@@ -81,12 +80,6 @@ export class MineBlockBehavior {
 
             if (distance > this.MAX_REACHABLE_DISTANCE) {
                 USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
-                this.executeNextStep();
-                return;
-            }
-
-            if (distance < this.MIN_REACHABLE_DISTANCE) {
-                USE_PATHFINDER ? await this.backUpWithPF(targetBlock) : await this.backUp();
                 this.executeNextStep();
                 return;
             }
