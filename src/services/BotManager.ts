@@ -1,8 +1,7 @@
-// src/services/BotManager.ts (Pathfinder削除版)
+// src/services/BotManager.ts (修正後)
 
 import * as mineflayer from 'mineflayer';
 import { EventEmitter } from 'events';
-// pathfinderのインポートを削除
 
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
@@ -36,16 +35,12 @@ export class BotManager {
                 username: this.username,
             });
 
-            // ★ここを修正: Pathfinderプラグインの読み込みをすべて削除
-            // this.bot.loadPlugin(pathfinder); 
-
             this.setupBotListeners();
 
             await new Promise<void>((resolve, reject) => {
                 if (!this.bot) return reject(new Error("Bot not initialized"));
 
                 this.bot.once('spawn', () => {
-                    // ★ここを修正: Pathfinderの移動設定もすべて削除
                     this.setStatus('connected');
                     this.botInstanceEventEmitter.emit('spawn', this.bot);
                     resolve();
@@ -75,6 +70,7 @@ export class BotManager {
         this.bot.on('end', (reason) => { this.setStatus('disconnected'); this.cleanupBot(); this.scheduleReconnect(); });
         this.bot.on('kicked', (reason) => { console.error(`Bot kicked: ${reason}`); });
         this.bot.on('error', (err) => { this.setStatus('error'); this.bot?.end('Error occurred'); });
+        
         this.bot.on('spawn', () => {
             if (this.status !== 'connected') {
                 this.setStatus('connected');
@@ -82,8 +78,26 @@ export class BotManager {
                 this.botInstanceEventEmitter.emit('spawn', this.bot);
             }
         });
-        this.bot.on('death', () => { this.botInstanceEventEmitter.emit('death'); });
-        this.bot.on('respawn', () => { this.botInstanceEventEmitter.emit('respawn'); });
+
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 修正: 'death'イベントを捕捉し、リスポーン処理を呼び出す ★
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        this.bot.on('death', () => {
+            this.botInstanceEventEmitter.emit('death');
+            console.log(`${this.username} has died. Respawning in 5 seconds...`);
+            setTimeout(() => {
+                if (this.bot) {
+                    this.bot.respawn();
+                }
+            }, 5000); // 5秒待ってからリスポーン
+        });
+        
+        this.bot.on('respawn', () => {
+            console.log(`${this.username} has respawned.`);
+            // リスポーン後、再度'spawn'イベントが発火するので、
+            // Botの準備が整ったことをシステムに通知する処理は'spawn'リスナーに集約される
+            this.botInstanceEventEmitter.emit('respawn');
+        });
     }
 
     private cleanupBot(): void {
