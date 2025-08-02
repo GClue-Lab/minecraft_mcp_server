@@ -90,8 +90,10 @@ export class Planner {
             const nearestHostile = this.findNearestHostileMob(10);
             if (nearestHostile) {
                 if (currentAction && currentAction.type === 'combat' && currentAction.arguments.targetEntityId === nearestHostile.id) {
+                    console.log(`[DEBUG] Planner: Ideal action determined to be: continue combat`);
                     return currentAction;
                 }
+                console.log(`[DEBUG] Planner: Ideal action determined to be: new combat task`);
                 return this.createAction('combat', { targetEntityId: nearestHostile.id });
             }
         }
@@ -99,11 +101,13 @@ export class Planner {
         // 割り込みがないかチェック
         const highPriorityPendingTask = this.findHighPriorityPendingTask(currentAction ? currentAction.priority : 999);
         if (highPriorityPendingTask) {
+            console.log(`[DEBUG] Planner: Ideal action determined to be: high priority task (${highPriorityPendingTask.type})`);
             return highPriorityPendingTask;
         }
         
         // 割り込みがなく、現在のタスクがまだ有効なら、現在のタスクを続けるのが理想
         if (currentAction && this.isTaskStillValid(currentAction)) {
+            console.log(`[DEBUG] Planner: Ideal action determined to be: continue current task (${currentAction.type})`);
             return currentAction;
         }
 
@@ -111,17 +115,25 @@ export class Planner {
         for (const mode of MODE_PRIORITY_ORDER) {
             if (mode === 'MINING' && this.modeManager.isMiningMode()) {
                 const task = this.taskManager.findNextPendingMiningTask();
-                if (task) return task;
+                if (task) {
+                    console.log(`[DEBUG] Planner: Ideal action determined to be: new mining task`);
+                    return task;
+                }
             }
             if (mode === 'FOLLOW' && this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+                console.log(`[DEBUG] Planner: Ideal action determined to be: new follow task`);
                 return this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
             }
             if (mode === 'GENERAL') {
                 const task = this.taskManager.findNextPendingGeneralTask();
-                if (task) return task;
+                if (task) {
+                    console.log(`[DEBUG] Planner: Ideal action determined to be: new general task`);
+                    return task;
+                }
             }
         }
 
+        console.log(`[DEBUG] Planner: Ideal action determined to be: none`);
         return null; // 何もすることがない
     }
 
