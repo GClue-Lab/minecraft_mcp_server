@@ -57,7 +57,7 @@ export class Planner {
             if (!idealTask) {
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'cancel' });
             } else if (idealTask.taskId !== currentTask.taskId) {
-                this.chatReporter.reportError(`[DEBUG] Planner: Interrupting ${currentTask.type} for ${idealTask.type}.`);
+                //this.chatReporter.reportError(`[DEBUG] Planner: Interrupting ${currentTask.type} for ${idealTask.type}.`);
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
                 this.startTask(idealTask);
             }
