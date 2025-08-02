@@ -19,8 +19,8 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             
-            const mcData = require('minecraft-data')(bot.version);
-            bot.registry = mcData;
+            //const mcData = require('minecraft-data')(bot.version);
+            //bot.registry = mcData;
 
             // ★ 修正: 古いbehaviorEngineの宣言を削除し、依存関係の順序を整理
             const worldKnowledge = new WorldKnowledge(bot);
