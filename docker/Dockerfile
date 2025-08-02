@@ -22,15 +22,15 @@ COPY package*.json ./
 RUN npm install
 
 # patch コマンドのために build-essential をインストール
-RUN apt-get update && \
-    apt-get install -y patch && \
-    rm -rf /var/lib/apt/lists/*
+#RUN apt-get update && \
+#    apt-get install -y patch && \
+#    rm -rf /var/lib/apt/lists/*
 
 # パッチファイルをコピー
-COPY patches/mineflayer-physics-safe.patch /tmp/physics.patch
+#COPY patches/mineflayer-physics-safe.patch /tmp/physics.patch
 
 # mineflayerのパッチ適用
-RUN patch -p0 -d node_modules/mineflayer < /tmp/physics.patch
+#RUN patch -p0 -d node_modules/mineflayer < /tmp/physics.patch
 
 
 # 必要なソースコードと設定ファイルをコピー
