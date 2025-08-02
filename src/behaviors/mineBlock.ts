@@ -67,8 +67,10 @@ export class MineBlockBehavior {
                 return;
             }
 
+            console.log(`[DEBUG] MineBlock: Attempting to find nearest '${blockName}'...`);
             const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
-        
+            console.log(`[DEBUG] MineBlock: Found nearest block at ${targetBlock?.position || 'null'}.`);
+    
             if (!targetBlock) {
                 this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
                 this.isActive = false;
