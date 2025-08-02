@@ -52,43 +52,49 @@ export class MineBlockBehavior {
     }
 
     private async executeNextStep(): Promise<void> {
-        if (!this.isActive || this.task.arguments.quantity <= 0) {
-            this.isActive = false;
-            return;
-        }
+        try {
+            if (!this.isActive || this.task.arguments.quantity <= 0) {
+                this.isActive = false;
+                return;
+            }
+
+            const blockName = this.task.arguments.blockName;
+            const blockId = blockName ? this.bot.registry.blocksByName[blockName]?.id : null;
+
+            if (!blockId) {
+                this.chatReporter.reportError(`Unknown block name: ${blockName}`);
+                this.isActive = false;
+                return;
+            }
+
+            const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
         
-        const blockName = this.task.arguments.blockName;
-        const blockId = blockName ? this.bot.registry.blocksByName[blockName]?.id : null;
+            if (!targetBlock) {
+                this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
+                this.isActive = false;
+                return;
+            }
 
-        if (!blockId) {
-            this.chatReporter.reportError(`Unknown block name: ${blockName}`);
-            this.isActive = false;
-            return;
+            const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
+
+            if (distance > this.MAX_REACHABLE_DISTANCE) {
+                USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
+                this.executeNextStep();
+                return;
+            }
+
+            if (distance < this.MIN_REACHABLE_DISTANCE) {
+                USE_PATHFINDER ? await this.backUpWithPF(targetBlock) : await this.backUp();
+                this.executeNextStep();
+                return;
+            }
+
+            this.startDigging(targetBlock);
+        } catch (e: any) {
+            this.chatReporter.reportError(`[FATAL] An error occurred in executeNextStep: ${e.message}`);
+            this.chatReporter.reportError(e.stack); // より詳細なエラー情報を表示
+            this.isActive = false; // エラーが発生したら行動を停止
         }
-
-        const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
-        
-        if (!targetBlock) {
-            this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
-            this.isActive = false;
-            return;
-        }
-
-        const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
-
-        if (distance > this.MAX_REACHABLE_DISTANCE) {
-            USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
-            this.executeNextStep();
-            return;
-        }
-
-        if (distance < this.MIN_REACHABLE_DISTANCE) {
-            USE_PATHFINDER ? await this.backUpWithPF(targetBlock) : await this.backUp();
-            this.executeNextStep();
-            return;
-        }
-
-        this.startDigging(targetBlock);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
