@@ -1,4 +1,4 @@
-// src/services/Planner.ts (根本的な欠陥を修正した最終版)
+// src/services/Planner.ts (FOLLOWモードのロジックを実装した修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -42,7 +42,6 @@ export class Planner {
             if (reason === 'Completed successfully') {
                 this.taskManager.removeTask(finishedTask.taskId);
             }
-            // タスク完了・中断後、即座に次の判断へ
             this.mainLoop();
         });
 
@@ -50,49 +49,30 @@ export class Planner {
         console.log('Planner initialized. Bot brain is now active.');
     }
 
-    /**
-     * メインの思考ループ。
-     * 「理想の行動」と「現在の行動」を比較し、状態を遷移させる。
-     */
     private mainLoop(): void {
         const idealTask = this.findIdealTask();
         const currentTask = this.behaviorEngine.getActiveTask();
 
         if (currentTask) {
-            // --- ケース1: ボットが何かタスクを実行中の場合 ---
             if (!idealTask) {
-                // やるべき事がなくなった場合（例：採掘モードOFF）、現在のタスクを停止
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'cancel' });
             } else if (idealTask.taskId !== currentTask.taskId) {
-                // より優先度の高いタスクが見つかった場合、現在のタスクを中断して新しいタスクを開始
                 this.chatReporter.reportError(`[DEBUG] Planner: Interrupting ${currentTask.type} for ${idealTask.type}.`);
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
                 this.startTask(idealTask);
             }
-            // idealTaskとcurrentTaskが同じなら何もしない（継続）
-
         } else {
-            // --- ケース2: ボットがアイドル状態の場合 ---
             if (idealTask) {
-                // やるべき事が見つかったので、タスクを開始
                 this.startTask(idealTask);
             }
         }
     }
     
-    /**
-     * 新しいタスクを開始させるためのヘルパーメソッド
-     */
     private startTask(task: Task): void {
-        // タスクのステータスを「実行中」に更新してから実行を命令する
         this.taskManager.setTaskStatus(task.taskId, 'running');
         this.behaviorEngine.executeTask(task);
     }
 
-    /**
-     * 現在のモードとタスクキューに基づき、今やるべき最も優先度の高い「理想のタスク」を1つだけ見つける。
-     * @returns 理想のタスク、またはnull
-     */
     private findIdealTask(): Task | null {
         for (const mode of MODE_PRIORITY_ORDER) {
             let task: Task | null = null;
@@ -101,7 +81,6 @@ export class Planner {
                     if (this.modeManager.isCombatMode()) {
                         const nearestHostile = this.findNearestHostileMob(10);
                         if (nearestHostile) {
-                            // 戦闘タスクはキューに入れない一時的なタスクとして生成
                             task = this.createAction('combat', { targetEntityId: nearestHostile.id });
                         }
                     }
@@ -112,16 +91,17 @@ export class Planner {
                     }
                     break;
                 case 'FOLLOW':
-                    // To be implemented
+                    // ★ 修正: FOLLOWモードのタスク生成ロジックを実装
+                    if (this.modeManager.isFollowMode() && this.modeManager.getFollowTarget()) {
+                        task = this.createAction('follow', { targetPlayer: this.modeManager.getFollowTarget() });
+                    }
                     break;
                 case 'GENERAL':
                     task = this.taskManager.findNextPendingGeneralTask();
                     break;
             }
-            // いずれかのモードでタスクが見つかったら、それが最優先なので、すぐに返す
             if (task) return task;
         }
-        // ループをすべて回っても何も見つからなかった
         return null;
     }
 
@@ -148,7 +128,7 @@ export class Planner {
             taskId: `planner-${type}-${Date.now()}`,
             type: type,
             arguments: args,
-            status: 'running', // このタスクは即時実行される前提
+            status: 'running',
             priority: ACTION_PRIORITIES[type] ?? 100,
             createdAt: Date.now(),
         };
