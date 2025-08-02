@@ -77,7 +77,7 @@ export class MineBlockBehavior {
             }
 
             if (!this.bot.entity) {
-                console.log(`[DEBUG] Bot entity not available yet. Retrying in 1 second...``);
+                console.log(`[DEBUG] Bot entity not available yet. Retrying in 1 second...`);
                 setTimeout(() => this.executeNextStep(), 1000); // 1秒後にもう一度試す
                 return;
             }
