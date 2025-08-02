@@ -76,6 +76,12 @@ export class MineBlockBehavior {
                 return;
             }
 
+            if (!this.bot.entity) {
+                console.log(`[DEBUG] Bot entity not available yet. Retrying in 1 second...``);
+                setTimeout(() => this.executeNextStep(), 1000); // 1秒後にもう一度試す
+                return;
+            }
+
             const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
 
             if (distance > this.MAX_REACHABLE_DISTANCE) {
