@@ -1,4 +1,4 @@
-// src/behaviors/mineBlock.ts (素手での採掘対応版)
+// src/behaviors/mineBlock.ts (Promise形式・最終修正版)
 
 import * as mineflayer from 'mineflayer';
 import { WorldKnowledge } from '../services/WorldKnowledge';
@@ -21,7 +21,6 @@ export class MineBlockBehavior {
     private isActive: boolean = false;
     private minedCount: number = 0;
     private readonly REACHABLE_DISTANCE = 4.0;
-    private currentTargetBlock: Block | null = null;
 
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, options: MineBlockOptions) {
         this.bot = bot;
@@ -32,8 +31,6 @@ export class MineBlockBehavior {
             maxDistance: options.maxDistance ?? 32,
             blockName: options.blockName ?? null,
         };
-        this.onDiggingCompleted = this.onDiggingCompleted.bind(this);
-        this.onDiggingAborted = this.onDiggingAborted.bind(this);
     }
 
     public start(): boolean {
@@ -46,7 +43,7 @@ export class MineBlockBehavior {
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
-        this.removeListeners();
+        // 採掘中にstop()が呼ばれると、bot.dig()のPromiseがrejectされ、.catch()が呼ばれる
         this.bot.stopDigging();
         this.bot.clearControlStates();
     }
@@ -60,15 +57,16 @@ export class MineBlockBehavior {
     }
 
     private async executeNextStep(): Promise<void> {
+        // タスクが非アクティブになったか、目標数を達成したら終了
         if (!this.isActive || this.minedCount >= this.options.quantity) {
-            this.stop();
+            this.isActive = false; // 確実に終了させる
             return;
         }
-
+        
         const blockId = this.options.blockName ? this.bot.registry.blocksByName[this.options.blockName]?.id : null;
         if (!blockId) {
-            console.error(`[MineBlock] Unknown block name: ${this.options.blockName}`);
-            this.stop();
+            this.chatReporter.reportError(`Unknown block name: ${this.options.blockName}`);
+            this.isActive = false;
             return;
         }
 
@@ -76,137 +74,66 @@ export class MineBlockBehavior {
         
         if (!targetBlock) {
             this.chatReporter.reportError(`Could not find any more ${this.options.blockName}. Stopping task.`);
-            this.stop();
+            this.isActive = false;
             return;
         }
 
-        this.currentTargetBlock = targetBlock;
-        const botPos = this.bot.entity.position;
-        const targetPos = targetBlock.position;
-        const distance = botPos.distanceTo(targetPos);
-        const isTargetAtFeet = targetPos.equals(botPos.floored());
+        const distance = this.bot.entity.position.distanceTo(targetBlock.position);
 
-        if (isTargetAtFeet) {
-            const safeSpot = this.findSafeAdjacentSpot();
-            if (safeSpot) {
-                await this.moveToSafeSpot(safeSpot);
-                this.executeNextStep();
-                return;
-            }
-        } else if (distance > this.REACHABLE_DISTANCE) {
+        if (distance > this.REACHABLE_DISTANCE) {
             await this.moveToTarget(targetBlock);
+            // 移動後、再度次のステップを評価する
             this.executeNextStep();
             return;
         }
         
-        await this.startDigging(targetBlock);
+        // 採掘可能な位置にいれば、採掘を開始
+        this.startDigging(targetBlock);
     }
 
-    /**
-     * 採掘を開始し、イベントリスナーをセットする
-     * @param targetBlock 採掘対象のブロック
-     */
     private async startDigging(targetBlock: Block): Promise<void> {
-        this.bot.clearControlStates();
-        const bestTool = this.getBestToolFor(targetBlock);
-
-        // ★★★★★★★★★★ ここからロジックを修正 ★★★★★★★★★★
-        if (bestTool) {
-            // 最適なツールがあれば装備する
-            await this.bot.equip(bestTool, 'hand');
-            this.chatReporter.reportError(`Equipped ${bestTool.name}.`);
-        } else {
-            // 最適なツールがなければ、現在手に持っているアイテムをしまう（素手にする）
-            const heldItem = this.bot.heldItem;
-            if (heldItem) {
-                await this.bot.unequip('hand');
-                this.chatReporter.reportError(`No tool found. Using bare hands.`);
-            }
-        }
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-        this.addListeners();
+        await this.equipBestTool(targetBlock);
         this.chatReporter.reportError(`Starting to dig ${this.options.blockName} at ${targetBlock.position}.`);
-        this.bot.dig(targetBlock);
+        
+        // ★★★★★★★★★★ ここをあなたのテストコードに基づき、全面的に修正 ★★★★★★★★★★
+        this.bot.dig(targetBlock)
+            .then(() => {
+                // 採掘が完了したときの処理
+                if (!this.isActive) return; // 既に停止命令が出ていれば何もしない
 
-        // dig()の直後に、mineflayerに1ゲームティック分のイベント処理を強制させる
-        // これにより、採掘開始パケットの送信を確実に行うための「隙」を作る
-        try {
-            await this.bot.waitForTicks(10);
-        } catch (err) {
-            // waitForTicksが中断された場合など (エラーは無視して良い)
-        }
-    }
+                this.minedCount++;
+                this.chatReporter.reportError(`Successfully mined ${this.minedCount}/${this.options.quantity} of ${this.options.blockName}.`);
+                
+                // 次のブロックを探しに行く
+                this.executeNextStep();
+            })
+            .catch((err) => {
+                // 採掘が失敗、または中断されたときの処理
+                if (!this.isActive) return; // 意図的に停止された場合はエラー報告しない
 
-    private onDiggingCompleted(block: Block): void {
-        if (this.currentTargetBlock && this.currentTargetBlock.position.equals(block.position)) {
-            this.minedCount++;
-            this.removeListeners();
-            setTimeout(() => this.executeNextStep(), 100);
-        }
-    }
-
-    private onDiggingAborted(block: Block): void {
-        if (this.currentTargetBlock && this.currentTargetBlock.position.equals(block.position)) {
-            this.removeListeners();
-            this.chatReporter.reportError("Digging was aborted. Retrying...");
-            setTimeout(() => this.executeNextStep(), 1000);
-        }
-    }
-
-    private addListeners(): void {
-        this.bot.on('diggingCompleted', this.onDiggingCompleted);
-        this.bot.on('diggingAborted', this.onDiggingAborted);
-    }
-
-    private removeListeners(): void {
-        this.bot.removeListener('diggingCompleted', this.onDiggingCompleted);
-        this.bot.removeListener('diggingAborted', this.onDiggingAborted);
+                this.chatReporter.reportError(`Digging failed or was interrupted: ${err.message}. Retrying...`);
+                // 1秒待ってから再試行
+                setTimeout(() => this.executeNextStep(), 1000);
+            });
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     }
 
     private async moveToTarget(targetBlock: Block): Promise<void> {
-        this.bot.lookAt(targetBlock.position, true);
+        this.bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5), true);
         this.bot.setControlState('forward', true);
-        const distance = this.bot.entity.position.distanceTo(targetBlock.position);
-        this.bot.setControlState('sprint', distance > 6);
-        this.bot.setControlState('jump', this.bot.entity.onGround && targetBlock.position.y > this.bot.entity.position.y);
         await new Promise(resolve => setTimeout(resolve, 200));
-    }
-
-    private findSafeAdjacentSpot(): Vec3 | null {
-        const botPos = this.bot.entity.position.floored();
-        const directions = [
-            new Vec3(1, 0, 0),
-            new Vec3(-1, 0, 0),
-            new Vec3(0, 0, 1),
-            new Vec3(0, 0, -1)
-        ];
-
-        for (const dir of directions) {
-            const spot = botPos.plus(dir);
-            const groundBlock = this.bot.blockAt(spot.offset(0, -1, 0));
-            const footBlock = this.bot.blockAt(spot);
-            const headBlock = this.bot.blockAt(spot.offset(0, 1, 0));
-
-            const isSafe = 
-                groundBlock && groundBlock.boundingBox === 'block' &&
-                footBlock && footBlock.boundingBox === 'empty' &&
-                headBlock && headBlock.boundingBox === 'empty';
-
-            if (isSafe) {
-                return spot;
-            }
-        }
-        return null;
-    }
-
-    private async moveToSafeSpot(destination: Vec3): Promise<void> {
-        this.bot.lookAt(destination.offset(0.5, 0, 0.5), true);
-        this.bot.setControlState('forward', true);
-        await new Promise(resolve => setTimeout(resolve, 400));
         this.bot.clearControlStates();
     }
     
+    private async equipBestTool(block: Block): Promise<void> {
+        const bestTool = this.getBestToolFor(block);
+        if (bestTool) {
+            await this.bot.equip(bestTool, 'hand');
+        } else if (this.bot.heldItem) {
+            await this.bot.unequip('hand');
+        }
+    }
+
     private getBestToolFor(block: Block): Item | null {
         const blockName = block.name;
         let toolType = '';
@@ -218,8 +145,6 @@ export class MineBlockBehavior {
         } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
             toolType = '_shovel';
         } else {
-            // ★修正: 特定のツールがないブロックでも、nullを返さずに処理を続行させる
-            // この場合、ツール検索は行われず、結果的に素手で掘ることになる
             return null;
         }
 
