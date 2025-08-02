@@ -64,16 +64,16 @@ bot.once('spawn', () => {
   // --- 2. 状況を判断し行動する「脳」 ---
   setInterval(() => {
     // 【最優先事項】常に周囲の脅威を確認
-    const nearestZombie = bot.nearestEntity(e => e.name === 'zombie' && e.position.distanceTo(bot.entity.position) < ZOMBIE_AGGRO_RANGE);
+    const nearestEnemy = bot.nearestEntity(e => e.type === 'hostile' && e.position.distanceTo(bot.entity.position) < ZOMBIE_AGGRO_RANGE);
 
-    if (nearestZombie) {
+    if (nearestEnemy) {
       if (botState !== 'FIGHTING') {
         console.log('敵性存在を検知！全ての任務を中断し、戦闘態勢に移行します。');
         bot.stopDigging(); // 採掘中なら中断
         bot.pathfinder.stop(); // 移動中なら中断
       }
       botState = 'FIGHTING';
-      targetEnemy = nearestZombie;
+      targetEnemy = nearestEnemy;
     } else if (botState === 'FIGHTING') {
       // ゾンビがいなくなり、戦闘状態だった場合は待機状態に戻る
       console.log('脅威は排除されました。待機状態に戻ります。');
