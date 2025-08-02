@@ -82,7 +82,33 @@ export class MineBlockBehavior {
                 return;
             }
 
-            const distance = this.bot.entity.position.distanceTo(targetBlock.position.offset(0.5, 0.5, 0.5));
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            // ★★★ これが最終診断：計算処理を分解してログを仕込む ★★★
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            console.log('[DIAGNOSTIC] Step 1: targetBlock.position is accessible.');
+            const targetPos = targetBlock.position;
+            if (!targetPos) {
+                this.chatReporter.reportError('[FATAL] targetBlock.position is null!');
+                this.isActive = false;
+                return;
+            }
+
+            console.log('[DIAGNOSTIC] Step 2: bot.entity.position is accessible.');
+            const botPos = this.bot.entity.position;
+            if (!botPos) {
+                this.chatReporter.reportError('[FATAL] bot.entity.position is null!');
+                this.isActive = false;
+                return;
+            }
+
+            console.log('[DIAGNOSTIC] Step 3: Attempting to call .offset() on target position...');
+            const centerOfBlock = targetPos.offset(0.5, 0.5, 0.5);
+            console.log('[DIAGNOSTIC] Step 4: .offset() call successful.');
+
+            console.log('[DIAGNOSTIC] Step 5: Attempting to call .distanceTo() on bot position...');
+            const distance = botPos.distanceTo(centerOfBlock);
+            console.log(`[DIAGNOSTIC] Step 6: .distanceTo() call successful. Distance is ${distance}.`);
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
             if (distance > this.MAX_REACHABLE_DISTANCE) {
                 USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
