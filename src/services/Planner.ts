@@ -1,4 +1,4 @@
-// src/services/Planner.ts (中断・再開対応版)
+// src/services/Planner.ts (最終修正版)
 
 import { BehaviorEngine } from './BehaviorEngine';
 import { TaskManager } from './TaskManager';
@@ -54,49 +54,45 @@ export class Planner {
         console.log('Planner initialized. Bot brain is now active.');
     }
 
-    /**
-     * メインの思考ループ。
-     * 「理想の行動」と「現在の行動」を比較し、状態を遷移させる。
-     */
     private mainLoop(): void {
         const idealAction = this.decideNextAction();
         const currentTask = this.behaviorEngine.getActiveTask();
 
         if (currentTask) {
-            // --- ケース1: ボットが何かタスクを実行中の場合 ---
-            // 理想の行動があり、かつ現在の行動とタイプが異なる場合（＝より優先度の高いタスクが見つかった場合）
             if (idealAction && idealAction.type !== currentTask.type) {
-                // 「中断」扱いで現在のタスクを停止させる。
                 this.behaviorEngine.stopCurrentBehavior({ reason: 'interrupt' });
             }
-
-        } else {
-            // --- ケース2: ボットがアイドル状態の場合 ---
+        } else { // ボットがアイドル状態の場合
             if (idealAction) {
-                let taskToExecute: Task | null = null;
-                // プランナーが生成したタスクか、タスクマネージャーのタスクかを確認
-                if (idealAction.taskId.startsWith('planner-')) {
-                    taskToExecute = idealAction;
-                } else {
-                    // タスクIDで比較して、正しいキューからタスクを取得する
-                    if (this.taskManager.peekNextMiningTask()?.taskId === idealAction.taskId) {
+                let taskToExecute: Task | null = idealAction;
+
+                // ★ 修正: プランナー起因のタスクでなければ、必ずキューから取り出す
+                if (!taskToExecute.taskId.startsWith('planner-')) {
+                    // idealActionはpeekの結果なので、対応するキューからタスクを正式に取り出す(getNext)
+                    if (taskToExecute.queueType === 'mining') {
                         taskToExecute = this.taskManager.getNextMiningTask();
-                    } else if (this.taskManager.peekNextGeneralTask()?.taskId === idealAction.taskId) {
+                    } else if (taskToExecute.queueType === 'general') {
                         taskToExecute = this.taskManager.getNextGeneralTask();
+                    } else {
+                        // キュータイプが不明なタスクは実行しない
+                        taskToExecute = null; 
                     }
                 }
                 
                 if (taskToExecute) {
-                    this.behaviorEngine.executeTask(taskToExecute);
+                    // タスクIDが一致することを確認（念のため）
+                    if (taskToExecute.taskId === idealAction.taskId) {
+                        this.behaviorEngine.executeTask(taskToExecute);
+                    } else {
+                        // PeekしたタスクとGetしたタスクが異なる場合。非同期処理などで起こりうる。
+                        // この場合は何もしないで次のループで再評価する。
+                        this.chatReporter.reportError(`[DEBUG] Planner: Task mismatch detected. Re-evaluating next cycle.`);
+                    }
                 }
             }
         }
     }
 
-    /**
-     * モードの優先順位に従って、今やるべき最も理想的な行動を一つだけ決定する。
-     * @returns 実行すべきTaskオブジェクト、またはnull
-     */
     private decideNextAction(): Task | null {
         for (const mode of MODE_PRIORITY_ORDER) {
             let task: Task | null = null;
@@ -112,12 +108,10 @@ export class Planner {
                     break;
                 
                 case 'MINING':
-                    // 実行中のmineタスクがあれば、それを最優先で継続する
                     const currentTask = this.behaviorEngine.getActiveTask();
                     if (currentTask && currentTask.type === 'mine') {
                         return currentTask;
                     }
-                    // 実行中のタスクがない場合のみ、キューから新しいタスクを探す
                     if (this.modeManager.isMiningMode()) {
                         task = this.taskManager.peekNextMiningTask();
                     }
