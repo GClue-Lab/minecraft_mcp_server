@@ -47,6 +47,10 @@ EXPOSE 3000
 #CMD [ "npm", "start" ]
 CMD [ "node", "dist/main.js" ]
 
+# test code
+COPY test ./test
+
+
 # 必要なパッケージをインストール（vim, tree）
 #RUN apt update && \
 #    apt install -y git vim tree && \

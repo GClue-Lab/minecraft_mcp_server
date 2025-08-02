@@ -13,7 +13,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^24.1.0",
     "express": "^5.1.0",
     "minecraft-data": "^3.93.0",
     "mineflayer": "^4.30.0",
@@ -23,7 +22,8 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
+    "@types/node": "^24.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.9.2"
   }
 }
