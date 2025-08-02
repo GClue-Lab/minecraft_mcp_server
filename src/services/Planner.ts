@@ -53,22 +53,13 @@ export class Planner {
 
         if (currentTask) {
             // --- ケース1: ボットが何かタスクを実行中の場合 ---
-
+            
             // ★★★★★★★★★★ ここからが修正点 ★★★★★★★★★★
-            // タスクがキューから来たものか、モードによって生成されたものかを判断
-            const isFromQueue = currentTask.type === 'mine' || currentTask.type === 'dropItems';
-
-            if (isFromQueue) {
-                // タスクがキューから来た場合、高優先度の割り込みがない限り継続する
-                if (decidedAction && decidedAction.priority < currentTask.priority) {
-                    this.behaviorEngine.stopCurrentBehavior();
-                }
-            } else {
-                // タスクがモードによるものの場合（follow, combatなど）、
-                // 続ける理由がなくなったか、高優先度の割り込みがあれば停止する
-                if (!decidedAction || (decidedAction.priority < currentTask.priority)) {
-                    this.behaviorEngine.stopCurrentBehavior();
-                }
+            // 以下の2つの場合に、現在のタスクを停止する
+            // 1. 次にやるべきことが何もない場合 (例: followモードがOFFになった)
+            // 2. 次にやるべきことがあり、それが現在のタスクより優先度が高い場合
+            if (!decidedAction || (decidedAction.priority < currentTask.priority)) {
+                this.behaviorEngine.stopCurrentBehavior();
             }
             // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
