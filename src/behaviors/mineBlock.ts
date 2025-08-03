@@ -110,10 +110,8 @@ export class MineBlockBehavior {
 
         if (distance > this.MAX_REACHABLE_DISTANCE) {
             this.moveToTarget(this.targetBlock);
-            this.internalState = 'MOVING';
         } else {
             this.startDigging(this.targetBlock);
-            this.internalState = 'DIGGING';
         }
     }
 
@@ -129,12 +127,14 @@ export class MineBlockBehavior {
 
     // --- 行動関数 ---
     private moveToTarget(targetBlock: Block): void {
+        this.internalState = 'MOVING';
         const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
-       (this.bot as any).pathfinder.setGoal(goal, true);
+        (this.bot as any).pathfinder.setGoal(goal, true);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
-        // 採掘を一度だけ開始するためのフラグ
+       this.internalState = 'DIGGING';
+       // 採掘を一度だけ開始するためのフラグ
         if (this.hasStartedDigging) return;
         this.hasStartedDigging = true;
 
