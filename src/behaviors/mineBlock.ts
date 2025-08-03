@@ -3,7 +3,7 @@ import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { Movements, goals } from 'mineflayer-pathfinder';
+import { goals } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
 // 内部的な状態を管理するための型
@@ -20,7 +20,6 @@ export class MineBlockBehavior {
     private internalState: InternalState = 'STARTING';
     private targetBlock: Block | null = null;
     private hasStartedDigging: boolean = false;
-    private onGoalReached: () => void;
     private readonly MAX_REACHABLE_DISTANCE = 4.0;
     
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
@@ -30,13 +29,6 @@ export class MineBlockBehavior {
         this.task = task;
         this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
         this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
-        this.onGoalReached = () => {
-            // 移動中に到着した場合のみ、状態をARRIVEDに変更する
-            if (this.internalState === 'MOVING') {
-                console.log(`[mineBlock]: goal_reached. State changed to ARRIVED.`);
-                this.internalState = 'ARRIVED';
-            }
-        };
     }
 
     private get pathfinder() {
@@ -46,15 +38,15 @@ export class MineBlockBehavior {
     public start(): boolean {
         if (this.isActive) return false;
         const pathfinder = this.pathfinder;
-        const ready = pathfinder && typeof pathfinder.on === 'function' && pathfinder.movements;
-        if (!ready) {
-            console.log(`[MineBlock] not ready: pathfinder=${!!pathfinder}, hasOn=${typeof pathfinder?.on}, moves=${!!pathfinder?.movements}, bot=${this.bot.username}`);
-            return false;
-        }
+        // イベントAPI(on/off)に依存しない準備判定に変更
+        const ready = pathfinder && typeof pathfinder.setGoal === 'function' && pathfinder.movements;
+         if (!ready) {
+            console.log(`[MineBlock] not ready: pathfinder=${!!pathfinder}, moves=${!!pathfinder?.movements}, bot=${this.bot.username}`);
+             return false;
+         }
 
         this.isActive = true;
         this.internalState = 'STARTING';
-        pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録
         this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
@@ -67,7 +59,6 @@ export class MineBlockBehavior {
             this.updateInterval = null;
         }
         const pathfinder = this.pathfinder;
-        if (pathfinder?.off) pathfinder.off('goal_reached', this.onGoalReached);
         if (pathfinder?.setGoal) pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
@@ -156,9 +147,18 @@ export class MineBlockBehavior {
     }
 
     private handleMovingState(): void {
-        if (!(this.bot as any).pathfinder.isMoving()) {
-            this.chatReporter.reportError('Arrived at destination. Starting to dig...');
-            this.startDigging(this.targetBlock!);
+        const pf = this.pathfinder;
+        if (!pf || !this.targetBlock || !this.bot.entity) return;
+        if (!pf.isMoving()) {
+            // 停止＝近いとは限らないので距離を再計測
+            const d = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
+            if (d <= this.MAX_REACHABLE_DISTANCE) {
+                this.chatReporter.reportError('Arrived at destination. Starting to dig...');
+                this.startDigging(this.targetBlock);
+            } else {
+                this.chatReporter.reportError(`Stopped but still far (${d.toFixed(2)}). Retrying pathfinding.`);
+                this.internalState = 'STARTING';
+            }
         }
     }
 
@@ -167,7 +167,8 @@ export class MineBlockBehavior {
         console.log(`[mineBlock] : MoveToTarget()`);
         this.internalState = 'MOVING';
         const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
-        this.pathfinder.setGoal(goal);
+        // 2引数目 true で“アクティブに追従（動的に再探索）”させたい場合は true に
+        this.pathfinder.setGoal(goal, true);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
