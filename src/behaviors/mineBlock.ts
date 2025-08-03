@@ -106,6 +106,7 @@ export class MineBlockBehavior {
         }
 
         const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
+        console.log(`[mineBlock] : Distance is ${distance}.`);
 
         if (distance > this.MAX_REACHABLE_DISTANCE) {
             this.moveToTarget(this.targetBlock);
