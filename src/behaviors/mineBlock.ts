@@ -29,7 +29,6 @@ export class MineBlockBehavior {
         this.worldKnowledge = worldKnowledge;
         this.chatReporter = chatReporter;
         this.task = task;
-        this.pathfinder = (this.bot as any).pathfinder;
         this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
         this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
         this.onGoalReached = () => {
@@ -43,9 +42,14 @@ export class MineBlockBehavior {
 
     public start(): boolean {
         if (this.isActive) return false;
+        const pathfinder = (this.bot as any).pathfinder;
+        if (!pathfinder || typeof pathfinder.on !== 'function') {
+            console.log(`Pathfinder is not ready yet (plugin not loaded or spawn not fired).`);
+            return false;
+        }
         this.isActive = true;
         this.internalState = 'STARTING';
-        this.pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
+        pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録
         this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
@@ -57,7 +61,10 @@ export class MineBlockBehavior {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        (this.bot as any).pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
+        const pathfinder = (this.bot as any).pathfinder;
+        if (pathfinder && typeof pathfinder.off === 'function') {
+            pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
+        }
         (this.bot as any).pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
