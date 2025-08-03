@@ -129,9 +129,8 @@ export class MineBlockBehavior {
 
     // --- 行動関数 ---
     private moveToTarget(targetBlock: Block): void {
-        const goal = new goals.GoalGetToBlock(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z);
-        // ★★★ awaitしないsetGoalを使用 ★★★
-        (this.bot as any).pathfinder.setGoal(goal, true);
+        const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
+       (this.bot as any).pathfinder.setGoal(goal, true);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
