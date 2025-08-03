@@ -64,6 +64,11 @@ export class BotManager {
 
             this.bot.loadPlugin(pathfinder);
             console.log('[BotManager] pathfinder plugin loaded?', !!(this.bot as any).pathfinder);
+
+            process.nextTick(() => {
+                console.log('[BotManager] after  load (nextTick):', !!(this.bot as any).pathfinder);
+            });
+
             this.setupBotListeners();
 
             await new Promise<void>((resolve, reject) => {
