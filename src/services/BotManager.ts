@@ -48,6 +48,7 @@ export class BotManager {
                     (this.bot as any).pathfinder.setMovements(defaultMove);
 
                     this.setStatus('connected');
+                    this.botInstanceEventEmitter.emit('pathfinder-ready', this.bot);
                     this.botInstanceEventEmitter.emit('spawn', this.bot);
                     resolve();
                 });
@@ -81,7 +82,6 @@ export class BotManager {
             if (this.status !== 'connected') {
                 this.setStatus('connected');
                 if (this.reconnectTimeout) { clearTimeout(this.reconnectTimeout); this.reconnectTimeout = null; }
-                this.botInstanceEventEmitter.emit('spawn', this.bot);
             }
         });
 

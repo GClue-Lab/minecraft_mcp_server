@@ -17,10 +17,6 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
     const chatReporter = new ChatReporter(botManager);
     const commandHandler = new CommandHandler(botManager, null, null, null, null, chatReporter);
 
-    botManager.getBotInstanceEventEmitter().once('bot_created', (bot: mineflayer.Bot) => {
-        bot.loadPlugin(pathfinder);
-    });
-
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             
