@@ -20,7 +20,7 @@ export class MineBlockBehavior {
     private internalState: InternalState = 'STARTING';
     private targetBlock: Block | null = null;
     private hasStartedDigging: boolean = false;
-
+    private onGoalReached: () => void;
     private readonly MAX_REACHABLE_DISTANCE = 4.0;
     
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
@@ -33,7 +33,7 @@ export class MineBlockBehavior {
         this.onGoalReached = () => {
             // 移動中に到着した場合のみ、状態をARRIVEDに変更する
             if (this.internalState === 'MOVING') {
-                console.log(`[mineBlock]: goal_reached. State changed to ARRIVED.');
+                console.log(`[mineBlock]: goal_reached. State changed to ARRIVED.`);
                 this.internalState = 'ARRIVED';
             }
         };
@@ -43,7 +43,7 @@ export class MineBlockBehavior {
         if (this.isActive) return false;
         this.isActive = true;
         this.internalState = 'STARTING';
-        this.pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
+        (this.bot as any).pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
         this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
@@ -55,7 +55,7 @@ export class MineBlockBehavior {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        this.pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
+        (this.bot as any).pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
         (this.bot as any).pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
