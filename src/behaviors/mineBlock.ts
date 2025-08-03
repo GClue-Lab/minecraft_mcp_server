@@ -117,10 +117,12 @@ export class MineBlockBehavior {
     }
 
     private handleMovingState(): void {
-        // Pathfinderが移動中でなくなったら、次の状態へ
         if (!(this.bot as any).pathfinder.isMoving()) {
-            this.chatReporter.reportError('Arrived at destination. Re-evaluating...');
-            this.internalState = 'STARTING';
+            this.chatReporter.reportError('Arrived at destination. Starting to dig...');
+            // ★★★ 状態を'STARTING'ではなく、'DIGGING'に直接移行させる ★★★
+            this.internalState = 'DIGGING'; 
+            // ★★★ 到着したので、すぐに採掘を開始する ★★★
+            this.startDigging(this.targetBlock!);
         }
     }
 
