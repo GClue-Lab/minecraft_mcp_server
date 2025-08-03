@@ -7,7 +7,7 @@ import { goals } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
 // 内部的な状態を管理するための型
-type InternalState = 'STARTING' | 'MOVING' | 'DIGGING' | 'DONE';
+type InternalState = 'STARTING' | 'MOVING' | 'ARRIVED' | 'DIGGING' | 'DONE';
 
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
@@ -30,13 +30,20 @@ export class MineBlockBehavior {
         this.task = task;
         this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
         this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
+        this.onGoalReached = () => {
+            // 移動中に到着した場合のみ、状態をARRIVEDに変更する
+            if (this.internalState === 'MOVING') {
+                console.log(`[mineBlock]: goal_reached. State changed to ARRIVED.');
+                this.internalState = 'ARRIVED';
+            }
+        };
     }
 
     public start(): boolean {
         if (this.isActive) return false;
         this.isActive = true;
         this.internalState = 'STARTING';
-        // 250ミリ秒ごとに状況を判断するループを開始
+        this.pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
         this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
@@ -48,6 +55,7 @@ export class MineBlockBehavior {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
+        this.pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
         (this.bot as any).pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
@@ -71,6 +79,9 @@ export class MineBlockBehavior {
                 break;
             case 'MOVING':
                 this.handleMovingState();
+                break;
+            case 'ARRIVED':
+                this.handleArrivedState();
                 break;
             case 'DIGGING':
                 // 採掘中は .then/.catch が状態を遷移させるので、ここでは何もしない
@@ -96,7 +107,6 @@ export class MineBlockBehavior {
             return;
         }
 
-        // ★★★ あなたの指示通り、デフォルトの探索方法に戻しました ★★★
         this.targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
 
         if (!this.targetBlock) {
@@ -112,6 +122,24 @@ export class MineBlockBehavior {
             this.moveToTarget(this.targetBlock);
         } else {
             this.startDigging(this.targetBlock);
+        }
+    }
+
+    private handleArrivedState(): void {
+        // ★★★ 到着後に距離を再計測するあなたのロジック ★★★
+        if (!this.bot.entity || !this.targetBlock) {
+             this.internalState = 'STARTING'; // 予期せぬエラーなら最初から
+             return;
+        }
+        const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
+
+        if (distance <= this.MAX_REACHABLE_DISTANCE) {
+            // 距離が近ければ採掘開始
+            this.startDigging(this.targetBlock);
+        } else {
+            // まだ遠ければ、もう一度経路探索からやり直す
+            this.chatReporter.reportError(`Still too far (${distance.toFixed(2)} blocks). Retrying pathfinding.`);
+            this.internalState = 'STARTING';
         }
     }
 
