@@ -3,7 +3,7 @@ import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { goals } from 'mineflayer-pathfinder';
+import { goals, Pathfinder } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
 // 内部的な状態を管理するための型
