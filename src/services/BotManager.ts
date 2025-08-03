@@ -6,6 +6,17 @@ import { EventEmitter } from 'events';
 import mineflayer from 'mineflayer';
 import { pathfinder, Movements } from 'mineflayer-pathfinder';
 
+// 1) 参照しているパスを確認
+console.log('[RESOLVE] mineflayer:', require.resolve('mineflayer'));
+console.log('[RESOLVE] pathfinder:', require.resolve('mineflayer-pathfinder'));
+
+// 2) エクスポート内容を確認（CJS / ESM 両方）
+try {
+  const cjs = require('mineflayer-pathfinder');
+  console.log('[EXPORTS CJS] keys:', Object.keys(cjs));
+} catch (e) {
+  console.log('[EXPORTS CJS] failed:', e);
+}
 
 export type BotStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
