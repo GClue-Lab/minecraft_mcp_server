@@ -10,17 +10,24 @@ import { StatusManager } from '../services/StatusManager';
 import { ChatReporter } from '../services/ChatReporter';
 import { Planner } from '../services/Planner';
 import * as mineflayer from 'mineflayer';
+import { pathfinder, Movements, goals } from 'mineflayer-pathfinder';
 
 export function setupBotSystem(botManager: BotManager): CommandHandler {
     
     const chatReporter = new ChatReporter(botManager);
     const commandHandler = new CommandHandler(botManager, null, null, null, null, chatReporter);
 
+    botManager.getBotInstanceEventEmitter().once('bot_created', (bot: mineflayer.Bot) => {
+        bot.loadPlugin(pathfinder);
+    });
+
     botManager.getBotInstanceEventEmitter().on('spawn', (bot: mineflayer.Bot) => {
         if (!commandHandler.isReady()) {
             
             //const mcData = require('minecraft-data')(bot.version);
             //bot.registry = mcData;
+
+
 
             // ★ 修正: 古いbehaviorEngineの宣言を削除し、依存関係の順序を整理
             const worldKnowledge = new WorldKnowledge(bot);
@@ -37,6 +44,9 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
         } else {
             // TODO: 再接続時のインスタンス更新処理
         }
+        // ★ spawnのたびに Movements をセット（再接続にも対応）
+         const defaultMove = new Movements(bot);
+         bot.pathfinder.setMovements(defaultMove);
     });
 
     return commandHandler;

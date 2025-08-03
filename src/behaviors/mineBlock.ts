@@ -3,7 +3,7 @@ import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { goals, Pathfinder } from 'mineflayer-pathfinder';
+import { Movements, goals } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
 // 内部的な状態を管理するための型
@@ -14,6 +14,7 @@ export class MineBlockBehavior {
     private worldKnowledge: WorldKnowledge;
     private chatReporter: ChatReporter;
     private task: Task;
+    private pathfinder: any;
 
     private isActive: boolean = false;
     private updateInterval: NodeJS.Timeout | null = null;
@@ -28,6 +29,7 @@ export class MineBlockBehavior {
         this.worldKnowledge = worldKnowledge;
         this.chatReporter = chatReporter;
         this.task = task;
+        this.pathfinder = (this.bot as any).pathfinder;
         this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
         this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
         this.onGoalReached = () => {
@@ -43,7 +45,7 @@ export class MineBlockBehavior {
         if (this.isActive) return false;
         this.isActive = true;
         this.internalState = 'STARTING';
-        (this.bot as any).pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
+        this.pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録        // 250ミリ秒ごとに状況を判断するループを開始
         this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
@@ -155,7 +157,7 @@ export class MineBlockBehavior {
         console.log(`[mineBlock] : MoveToTarget()`);
         this.internalState = 'MOVING';
         const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
-        (this.bot as any).pathfinder.setGoal(goal, true);
+        (this.bot as any).pathfinder.setGoal(goal);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
