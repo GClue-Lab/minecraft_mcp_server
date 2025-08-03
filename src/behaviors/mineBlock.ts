@@ -106,7 +106,7 @@ export class MineBlockBehavior {
         }
 
         const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
-        console.log(`[mineBlock] : Distance is ${distance}.`);
+        console.log(`[mineBlock] : Distance is ${distance}. MAX_REACHABLE_DISTANCE is ${this.MAX_REACHABLE_DISTANCE}`);
 
         if (distance > this.MAX_REACHABLE_DISTANCE) {
             this.moveToTarget(this.targetBlock);
@@ -118,21 +118,20 @@ export class MineBlockBehavior {
     private handleMovingState(): void {
         if (!(this.bot as any).pathfinder.isMoving()) {
             this.chatReporter.reportError('Arrived at destination. Starting to dig...');
-            // ★★★ 状態を'STARTING'ではなく、'DIGGING'に直接移行させる ★★★
-            this.internalState = 'DIGGING'; 
-            // ★★★ 到着したので、すぐに採掘を開始する ★★★
             this.startDigging(this.targetBlock!);
         }
     }
 
     // --- 行動関数 ---
     private moveToTarget(targetBlock: Block): void {
+        console.log(`[mineBlock] : MoveToTarget()`);
         this.internalState = 'MOVING';
         const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
         (this.bot as any).pathfinder.setGoal(goal, true);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
+       console.log(`[mineBlock] : StartDigging()`);
        this.internalState = 'DIGGING';
        // 採掘を一度だけ開始するためのフラグ
         if (this.hasStartedDigging) return;
