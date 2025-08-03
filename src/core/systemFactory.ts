@@ -10,7 +10,6 @@ import { StatusManager } from '../services/StatusManager';
 import { ChatReporter } from '../services/ChatReporter';
 import { Planner } from '../services/Planner';
 import * as mineflayer from 'mineflayer';
-import { pathfinder, Movements, goals } from 'mineflayer-pathfinder';
 
 export function setupBotSystem(botManager: BotManager): CommandHandler {
     
