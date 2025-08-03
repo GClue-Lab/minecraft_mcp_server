@@ -65,6 +65,16 @@ export class BotManager {
             this.bot.loadPlugin(pathfinder);
             console.log('[BotManager] pathfinder plugin loaded?', !!(this.bot as any).pathfinder);
 
+            // B) まだ false なら、直接呼ぶ
+            if (!(this.bot as any).pathfinder) {
+                try {
+                    (pathfinder as any)(this.bot); // 直接呼び出し
+                    console.log('[direct call] pathfinder:', !!(this.bot as any).pathfinder);
+                } catch (e) {
+                    console.error('[direct call] error:', e);
+                }
+            }
+
             process.nextTick(() => {
                 console.log('[BotManager] after  load (nextTick):', !!(this.bot as any).pathfinder);
             });
