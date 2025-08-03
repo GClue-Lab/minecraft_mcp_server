@@ -14,7 +14,6 @@ export class MineBlockBehavior {
     private worldKnowledge: WorldKnowledge;
     private chatReporter: ChatReporter;
     private task: Task;
-    private pathfinder: any;
 
     private isActive: boolean = false;
     private updateInterval: NodeJS.Timeout | null = null;
@@ -40,13 +39,19 @@ export class MineBlockBehavior {
         };
     }
 
+    private get pathfinder() {
+        return (this.bot as any).pathfinder; // 型は any でOK
+    }
+
     public start(): boolean {
         if (this.isActive) return false;
-        const pathfinder = (this.bot as any).pathfinder;
-        if (!pathfinder || typeof pathfinder.on !== 'function') {
-            console.log(`Pathfinder is not ready yet (plugin not loaded or spawn not fired).`);
+        const pathfinder = this.pathfinder;
+        const ready = pathfinder && typeof pathfinder.on === 'function' && pathfinder.movements;
+        if (!ready) {
+            console.log(`[MineBlock] not ready: pathfinder=${!!pathfinder}, hasOn=${typeof pathfinder?.on}, moves=${!!pathfinder?.movements}, bot=${this.bot.username}`);
             return false;
         }
+
         this.isActive = true;
         this.internalState = 'STARTING';
         pathfinder.on('goal_reached', this.onGoalReached); // リスナーを登録
@@ -61,11 +66,9 @@ export class MineBlockBehavior {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        const pathfinder = (this.bot as any).pathfinder;
-        if (pathfinder && typeof pathfinder.off === 'function') {
-            pathfinder.off('goal_reached', this.onGoalReached); // リスナーを解除
-        }
-        (this.bot as any).pathfinder.setGoal(null);
+        const pathfinder = this.pathfinder;
+        if (pathfinder?.off) pathfinder.off('goal_reached', this.onGoalReached);
+        if (pathfinder?.setGoal) pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
     }
@@ -164,7 +167,7 @@ export class MineBlockBehavior {
         console.log(`[mineBlock] : MoveToTarget()`);
         this.internalState = 'MOVING';
         const goal = new goals.GoalNear(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z, 1);
-        (this.bot as any).pathfinder.setGoal(goal);
+        this.pathfinder.setGoal(goal);
     }
 
     private async startDigging(targetBlock: Block): Promise<void> {
