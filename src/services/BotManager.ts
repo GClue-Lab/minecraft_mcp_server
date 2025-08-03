@@ -9,6 +9,7 @@ import { pathfinder, Movements } from 'mineflayer-pathfinder';
 // 1) 参照しているパスを確認
 console.log('[RESOLVE] mineflayer:', require.resolve('mineflayer'));
 console.log('[RESOLVE] pathfinder:', require.resolve('mineflayer-pathfinder'));
+console.log('[BotManager] typeof pathfinder:', typeof pathfinder);
 
 // 2) エクスポート内容を確認（CJS / ESM 両方）
 try {
@@ -50,6 +51,16 @@ export class BotManager {
                 username: this.username,
                 version: '1.21.4',
             });
+
+
+            try {
+                this.bot.loadPlugin(pathfinder);
+                console.log('[BotManager] loadPlugin(pathfinder) called');
+            } catch (e) {
+                console.error('[BotManager] loadPlugin threw:', e);
+            }
+
+            console.log('[BotManager] after  load pathfinder:', !!(this.bot as any).pathfinder);
 
             this.bot.loadPlugin(pathfinder);
             console.log('[BotManager] pathfinder plugin loaded?', !!(this.bot as any).pathfinder);
