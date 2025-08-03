@@ -52,32 +52,7 @@ export class BotManager {
                 version: '1.21.4',
             });
 
-
-            try {
-                this.bot.loadPlugin(pathfinder);
-                console.log('[BotManager] loadPlugin(pathfinder) called');
-            } catch (e) {
-                console.error('[BotManager] loadPlugin threw:', e);
-            }
-
-            console.log('[BotManager] after  load pathfinder:', !!(this.bot as any).pathfinder);
-
-            this.bot.loadPlugin(pathfinder);
-            console.log('[BotManager] pathfinder plugin loaded?', !!(this.bot as any).pathfinder);
-
-            // B) まだ false なら、直接呼ぶ
-            if (!(this.bot as any).pathfinder) {
-                try {
-                    (pathfinder as any)(this.bot); // 直接呼び出し
-                    console.log('[direct call] pathfinder:', !!(this.bot as any).pathfinder);
-                } catch (e) {
-                    console.error('[direct call] error:', e);
-                }
-            }
-
-            process.nextTick(() => {
-                console.log('[BotManager] after  load (nextTick):', !!(this.bot as any).pathfinder);
-            });
+            this.loadPathfinderOnce(this.bot);
 
             this.setupBotListeners();
 
@@ -112,6 +87,31 @@ export class BotManager {
             this.cleanupBot();
             this.setStatus('disconnected');
         }
+    }
+
+    // BotManager クラス内に追加
+    private loadPathfinderOnce(bot: mineflayer.Bot) {
+      // すでに注入済みなら何もしない
+      if ((bot as any).pathfinder) return;
+
+      // 1) まず loadPlugin を試す
+      try {
+        bot.loadPlugin(pathfinder);
+      } catch (e) {
+        console.error('[BotManager] loadPlugin(pathfinder) threw:', e);
+      }
+
+      // 2) まだ無ければ、直接呼び出しでフォールバック
+      if (!(bot as any).pathfinder) {
+        try {
+          (pathfinder as any)(bot);
+          console.log('[BotManager] fallback injected pathfinder directly');
+        } catch (e) {
+          console.error('[BotManager] direct injection failed:', e);
+        }
+      }
+
+      console.log('[BotManager] pathfinder ready?', !!(bot as any).pathfinder);
     }
 
     private setupBotListeners(): void {
