@@ -24,8 +24,8 @@ export function setupBotSystem(botManager: BotManager): CommandHandler {
             const behaviorEngine = new BehaviorEngine(bot, worldKnowledge, botManager, chatReporter, taskManager); 
             const statusManager = new StatusManager(bot, worldKnowledge, taskManager, modeManager, behaviorEngine);
             const planner = new Planner(behaviorEngine, taskManager, modeManager, worldKnowledge, statusManager, chatReporter);
-            
             commandHandler.setDependencies(taskManager, modeManager, statusManager, behaviorEngine);
+            planner.start()
         } else {
             // TODO: 再接続時のインスタンス更新処理
         }

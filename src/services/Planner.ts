@@ -22,7 +22,8 @@ export class Planner {
     private worldKnowledge: WorldKnowledge;
     private statusManager: StatusManager;
     private chatReporter: ChatReporter;
-    private mainLoopInterval: NodeJS.Timeout;
+    private mainLoopInterval: NodeJS.Timeout | null = null;
+    private loopStarted: boolean = false;
 
     constructor(
         behaviorEngine: BehaviorEngine,
@@ -47,9 +48,28 @@ export class Planner {
             // 完了・中断を問わず、即座に次の行動を評価する
             this.mainLoop();
         });
+    }
 
-        this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
-        console.log('Planner (Stateful Model) initialized. Bot brain is now active.');
+    /** pathfinder-ready 後に呼び出してメインループを開始 */
+    public start(): void {
+        if (this.loopStarted) return;
+        this.loopStarted = true;
+        if (!this.mainLoopInterval) {
+            this.mainLoopInterval = setInterval(() => this.mainLoop(), 500);
+        }
+        console.log('Planner started. Bot brain is now active.');
+        // 初回即実行
+        this.mainLoop();
+    }
+
+    /** 必要なら停止もできるように */
+    public stop(): void {
+        if (this.mainLoopInterval) {
+            clearInterval(this.mainLoopInterval);
+            this.mainLoopInterval = null;
+        }
+        this.loopStarted = false;
+        console.log('Planner stopped.');
     }
 
     /**
