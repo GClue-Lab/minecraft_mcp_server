@@ -6,23 +6,28 @@ import { Item } from 'prismarine-item';
 import { goals } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
-// 移動ロジック切り替えフラグ
-const USE_PATHFINDER = true; 
+// 内部的な状態を管理するための型
+type InternalState = 'STARTING' | 'MOVING' | 'DIGGING' | 'DONE';
 
 export class MineBlockBehavior {
     private bot: mineflayer.Bot;
     private worldKnowledge: WorldKnowledge;
     private chatReporter: ChatReporter;
     private task: Task;
-    private isActive: boolean = false;
-    private readonly MAX_REACHABLE_DISTANCE = 4.0;
 
+    private isActive: boolean = false;
+    private updateInterval: NodeJS.Timeout | null = null;
+    private internalState: InternalState = 'STARTING';
+    private targetBlock: Block | null = null;
+    private hasStartedDigging: boolean = false;
+
+    private readonly MAX_REACHABLE_DISTANCE = 4.0;
+    
     constructor(bot: mineflayer.Bot, worldKnowledge: WorldKnowledge, chatReporter: ChatReporter, task: Task) {
         this.bot = bot;
         this.worldKnowledge = worldKnowledge;
         this.chatReporter = chatReporter;
         this.task = task;
-        
         this.task.arguments.quantity = this.task.arguments.quantity ?? 1;
         this.task.arguments.maxDistance = this.task.arguments.maxDistance ?? 32;
     }
@@ -30,18 +35,20 @@ export class MineBlockBehavior {
     public start(): boolean {
         if (this.isActive) return false;
         this.isActive = true;
-        this.executeNextStep();
+        this.internalState = 'STARTING';
+        // 250ミリ秒ごとに状況を判断するループを開始
+        this.updateInterval = setInterval(() => this.update(), 250);
         return true;
     }
 
     public stop(): void {
         if (!this.isActive) return;
         this.isActive = false;
-
-        // ★★★ Pathfinderをより確実に停止させるための修正 ★★★
-        (this.bot as any).pathfinder.stop();
-        (this.bot as any).pathfinder.setGoal(null); // ゴールを明示的にnullに設定して、完全にリセットする
-
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+        (this.bot as any).pathfinder.setGoal(null);
         this.bot.stopDigging();
         this.bot.clearControlStates();
     }
@@ -50,81 +57,85 @@ export class MineBlockBehavior {
         return this.isActive;
     }
 
-    private async executeNextStep(): Promise<void> {
-        try {
-            if (!this.isActive || this.task.arguments.quantity <= 0) {
-                this.isActive = false;
-                return;
-            }
+    // --- メインの判断ループ（`executeNextStep`の代わり） ---
+    private update(): void {
+        if (!this.isActive) return;
 
-            const blockName = this.task.arguments.blockName;
-            const blockId = blockName ? this.bot.registry.blocksByName[blockName]?.id : null;
-
-            if (!blockId) {
-                this.chatReporter.reportError(`Unknown block name: ${blockName}`);
-                this.isActive = false;
-                return;
-            }
-
-            console.log(`[DEBUG] MineBlock: Attempting to find nearest '${blockName}'...`);
-            const targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
-            console.log(`[DEBUG] MineBlock: Found nearest block at ${targetBlock?.position || 'null'}.`);
-    
-            if (!targetBlock) {
-                this.chatReporter.reportError(`Could not find any more ${blockName}. Stopping task.`);
-                this.isActive = false;
-                return;
-            }
-
-            if (!this.bot.entity) {
-                console.log(`[DEBUG] Bot entity not available yet. Retrying in 1 second...`);
-                setTimeout(() => this.executeNextStep(), 1000); // 1秒後にもう一度試す
-                return;
-            }
-
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            // ★★★ これが最終診断：計算処理を分解してログを仕込む ★★★
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            console.log('[DIAGNOSTIC] Step 1: targetBlock.position is accessible.');
-            const targetPos = targetBlock.position;
-            if (!targetPos) {
-                this.chatReporter.reportError('[FATAL] targetBlock.position is null!');
-                this.isActive = false;
-                return;
-            }
-
-            console.log('[DIAGNOSTIC] Step 2: bot.entity.position is accessible.');
-            const botPos = this.bot.entity.position;
-            if (!botPos) {
-                this.chatReporter.reportError('[FATAL] bot.entity.position is null!');
-                this.isActive = false;
-                return;
-            }
-
-            console.log('[DIAGNOSTIC] Step 3: Attempting to call .offset() on target position...');
-            const centerOfBlock = targetPos.offset(0.5, 0.5, 0.5);
-            console.log('[DIAGNOSTIC] Step 4: .offset() call successful.');
-
-            console.log('[DIAGNOSTIC] Step 5: Attempting to call .distanceTo() on bot position...');
-            const distance = botPos.distanceTo(centerOfBlock);
-            console.log(`[DIAGNOSTIC] Step 6: .distanceTo() call successful. Distance is ${distance}.`);
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
-            if (distance > this.MAX_REACHABLE_DISTANCE) {
-                USE_PATHFINDER ? await this.moveToTargetWithPF(targetBlock) : await this.moveToTarget(targetBlock);
-                this.executeNextStep();
-                return;
-            }
-
-            this.startDigging(targetBlock);
-        } catch (e: any) {
-            this.chatReporter.reportError(`[FATAL] An error occurred in executeNextStep: ${e.message}`);
-            this.chatReporter.reportError(e.stack); // より詳細なエラー情報を表示
-            this.isActive = false; // エラーが発生したら行動を停止
+        if (this.task.arguments.quantity <= 0) {
+            this.internalState = 'DONE';
+        }
+        
+        switch (this.internalState) {
+            case 'STARTING':
+                this.handleStartingState();
+                break;
+            case 'MOVING':
+                this.handleMovingState();
+                break;
+            case 'DIGGING':
+                // 採掘中は .then/.catch が状態を遷移させるので、ここでは何もしない
+                break;
+            case 'DONE':
+                this.chatReporter.reportError('Task completed successfully.');
+                this.stop();
+                break;
         }
     }
 
+    private handleStartingState(): void {
+        if (!this.bot.entity) {
+            this.chatReporter.reportError('Bot entity not ready, waiting...');
+            return;
+        }
+
+        const blockName = this.task.arguments.blockName;
+        const blockId = this.bot.registry.blocksByName[blockName]?.id;
+        if (!blockId) {
+            this.chatReporter.reportError(`Unknown block name: ${blockName}`);
+            this.internalState = 'DONE';
+            return;
+        }
+
+        // ★★★ あなたの指示通り、デフォルトの探索方法に戻しました ★★★
+        this.targetBlock = this.worldKnowledge.findNearestBlock([blockId], this.task.arguments.maxDistance);
+
+        if (!this.targetBlock) {
+            this.chatReporter.reportError(`Could not find any more ${blockName}.`);
+            this.internalState = 'DONE';
+            return;
+        }
+
+        const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
+
+        if (distance > this.MAX_REACHABLE_DISTANCE) {
+            this.moveToTarget(this.targetBlock);
+            this.internalState = 'MOVING';
+        } else {
+            this.startDigging(this.targetBlock);
+            this.internalState = 'DIGGING';
+        }
+    }
+
+    private handleMovingState(): void {
+        // Pathfinderが移動中でなくなったら、次の状態へ
+        if (!(this.bot as any).pathfinder.isMoving()) {
+            this.chatReporter.reportError('Arrived at destination. Re-evaluating...');
+            this.internalState = 'STARTING';
+        }
+    }
+
+    // --- 行動関数 ---
+    private moveToTarget(targetBlock: Block): void {
+        const goal = new goals.GoalGetToBlock(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z);
+        // ★★★ awaitしないsetGoalを使用 ★★★
+        (this.bot as any).pathfinder.setGoal(goal, true);
+    }
+
     private async startDigging(targetBlock: Block): Promise<void> {
+        // 採掘を一度だけ開始するためのフラグ
+        if (this.hasStartedDigging) return;
+        this.hasStartedDigging = true;
+
         await this.equipBestTool(targetBlock);
         
         this.bot.dig(targetBlock)
@@ -132,58 +143,20 @@ export class MineBlockBehavior {
                 if (!this.isActive) return;
                 this.task.arguments.quantity--;
                 this.chatReporter.reportError(`Successfully mined. Remaining: ${this.task.arguments.quantity}`);
-                this.executeNextStep();
+                this.hasStartedDigging = false;
+                this.internalState = 'STARTING'; // 次のブロックを探しに行く
             })
             .catch((err) => {
                 if (!this.isActive) return;
-                this.chatReporter.reportError(`Digging failed or was interrupted: ${err.message}. Retrying...`);
-                setTimeout(() => this.executeNextStep(), 1000);
+                this.chatReporter.reportError(`Digging failed: ${err.message}. Retrying...`);
+                this.hasStartedDigging = false;
+                setTimeout(() => {
+                    if(this.isActive) this.internalState = 'STARTING'; // 1秒後に再試行
+                }, 1000);
             });
     }
 
-    // ========== Pathfinderを使用しない簡易移動 ==========
-    private async moveToTarget(targetBlock: Block): Promise<void> {
-        this.bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5), true);
-        this.bot.setControlState('forward', true);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        this.bot.clearControlStates();
-    }
-    
-    private async backUp(): Promise<void> {
-        this.bot.setControlState('back', true);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        this.bot.clearControlStates();
-    }
-
-    // ========== Pathfinderを使用した移動 ==========
-    private async moveToTargetWithPF(targetBlock: Block): Promise<void> {
-        // ★★★ ゴールの種類を、ブロックへの隣接を目的とする GoalGetToBlock に変更 ★★★
-        const goal = new goals.GoalGetToBlock(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z);
-        try {
-            await (this.bot as any).pathfinder.goto(goal);
-        } catch (e: any) {
-            this.chatReporter.reportError(`[Pathfinder] Could not reach target: ${e.message}`);
-        } finally {
-            // ★★★ 移動後に操作状態をクリアして、フリーズを防止 ★★★
-            this.bot.clearControlStates();
-        }
-    }
-
-    private async backUpWithPF(targetBlock: Block): Promise<void> {
-        // ★★★「あのブロックから離れたい」という柔軟なゴールに変更 ★★★
-        const goalToInvert = new goals.GoalBlock(targetBlock.position.x, targetBlock.position.y, targetBlock.position.z);
-        const goal = new goals.GoalInvert(goalToInvert);
-        try {
-            await (this.bot as any).pathfinder.goto(goal);
-        } catch (e: any) {
-            this.chatReporter.reportError(`[Pathfinder] Could not back up: ${e.message}`);
-        } finally {
-            // ★★★ 移動後に操作状態をクリアして、フリーズを防止 ★★★
-            this.bot.clearControlStates();
-        }
-    }
-
-    // ========== 道具の選択ロジック ==========
+    // --- 道具の選択ロジック (変更なし) ---
     private async equipBestTool(block: Block): Promise<void> {
         const bestTool = this.getBestToolFor(block);
         if (bestTool) {
@@ -196,16 +169,10 @@ export class MineBlockBehavior {
     private getBestToolFor(block: Block): Item | null {
         const blockName = block.name;
         let toolType = '';
-
-        if (blockName.includes('log') || blockName.includes('planks') || blockName.includes('wood')) {
-            toolType = '_axe';
-        } else if (blockName.includes('stone') || blockName.includes('ore') || blockName.includes('cobble')) {
-            toolType = '_pickaxe';
-        } else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) {
-            toolType = '_shovel';
-        } else {
-            return null;
-        }
+        if (blockName.includes('log') || blockName.includes('planks') || blockName.includes('wood')) { toolType = '_axe'; }
+        else if (blockName.includes('stone') || blockName.includes('ore') || blockName.includes('cobble')) { toolType = '_pickaxe'; }
+        else if (blockName.includes('dirt') || blockName.includes('sand') || blockName.includes('gravel')) { toolType = '_shovel'; }
+        else { return null; }
 
         const tools = this.bot.inventory.items().filter(item => item.name.endsWith(toolType));
         if (tools.length === 0) return null;
