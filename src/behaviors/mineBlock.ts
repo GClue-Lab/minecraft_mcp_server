@@ -181,6 +181,7 @@ export class MineBlockBehavior {
         this.hasStartedDigging = true;
 
         await this.equipBestTool(targetBlock);
+        console.log(`[mineBlock] : Digging ${targetBlock.name} at ${targetBlock.position}`);
         
         this.bot.dig(targetBlock)
             .then(() => {
@@ -205,8 +206,11 @@ export class MineBlockBehavior {
         const bestTool = this.getBestToolFor(block);
         if (bestTool) {
             await this.bot.equip(bestTool, 'hand');
-        } else if (this.bot.heldItem) {
-            await this.bot.unequip('hand');
+        } else {
+            // 必ず手ぶらにする（素手で掘れるブロックならOK）
+            if (this.bot.heldItem) {
+                await this.bot.unequip('hand');
+            }
         }
     }
 
