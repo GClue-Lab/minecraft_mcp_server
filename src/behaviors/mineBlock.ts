@@ -3,7 +3,7 @@ import { WorldKnowledge } from '../services/WorldKnowledge';
 import { ChatReporter } from '../services/ChatReporter';
 import { Block } from 'prismarine-block';
 import { Item } from 'prismarine-item';
-import { goals } from 'mineflayer-pathfinder';
+import { goals, Movements } from 'mineflayer-pathfinder';
 import { Task } from '../types/mcp';
 
 // 内部的な状態を管理するための型
@@ -38,12 +38,15 @@ export class MineBlockBehavior {
     public start(): boolean {
         if (this.isActive) return false;
         const pathfinder = this.pathfinder;
-        // イベントAPI(on/off)に依存しない準備判定に変更
-        const ready = pathfinder && typeof pathfinder.setGoal === 'function' && pathfinder.movements;
-         if (!ready) {
+        const ready = pathfinder && typeof pathfinder.setGoal === 'function';
+        if (!ready) {
             console.log(`[MineBlock] not ready: pathfinder=${!!pathfinder}, moves=${!!pathfinder?.movements}, bot=${this.bot.username}`);
-             return false;
-         }
+            return false;
+        }
+
+        // 移動アルゴリズムを明示的に設定
+        const defaultMove = new Movements(this.bot);
+        pathfinder.setMovements(defaultMove);
 
         this.isActive = true;
         this.internalState = 'STARTING';
