@@ -129,19 +129,16 @@ export class MineBlockBehavior {
     }
 
     private handleArrivedState(): void {
-        // ★★★ 到着後に距離を再計測するあなたのロジック ★★★
         if (!this.bot.entity || !this.targetBlock) {
-             this.internalState = 'STARTING'; // 予期せぬエラーなら最初から
-             return;
+            this.internalState = 'STARTING';
+            return;
         }
-        const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
 
+        const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
         if (distance <= this.MAX_REACHABLE_DISTANCE) {
-            // 距離が近ければ採掘開始
             this.startDigging(this.targetBlock);
         } else {
-            // まだ遠ければ、もう一度経路探索からやり直す
-            this.chatReporter.reportError(`Still too far (${distance.toFixed(2)} blocks). Retrying pathfinding.`);
+            this.chatReporter.reportError(`No longer close to block (${distance.toFixed(2)}). Restarting pathfinding.`);
             this.internalState = 'STARTING';
         }
     }
@@ -149,16 +146,18 @@ export class MineBlockBehavior {
     private handleMovingState(): void {
         const pf = this.pathfinder;
         if (!pf || !this.targetBlock || !this.bot.entity) return;
+
+        const distance = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
+        if (distance <= this.MAX_REACHABLE_DISTANCE) {
+            this.chatReporter.reportError(`Reached target block. Transitioning to ARRIVED. Distance=${distance.toFixed(2)}`);
+            this.internalState = 'ARRIVED';
+            return;
+        }
+
+        // 移動停止していて、かつ到達していない＝失敗とみなす
         if (!pf.isMoving()) {
-            // 停止＝近いとは限らないので距離を再計測
-            const d = this.bot.entity.position.distanceTo(this.targetBlock.position.offset(0.5, 0.5, 0.5));
-            if (d <= this.MAX_REACHABLE_DISTANCE) {
-                this.chatReporter.reportError('Arrived at destination. Starting to dig...');
-                this.startDigging(this.targetBlock);
-            } else {
-                this.chatReporter.reportError(`Stopped but still far (${d.toFixed(2)}). Retrying pathfinding.`);
-                this.internalState = 'STARTING';
-            }
+            this.chatReporter.reportError(`Movement stopped prematurely. Still far (${distance.toFixed(2)}). Retrying...`);
+            this.internalState = 'STARTING';
         }
     }
 
